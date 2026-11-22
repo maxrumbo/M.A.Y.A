@@ -18,7 +18,8 @@ public interface IAgentDispatcherService
         object payload,
         Guid? conversationId,
         bool requiresConfirmation,
-        string description);
+        string description,
+        EmailPreviewDto? emailPreview = null);
 
     /// <summary>
     /// Mengeksekusi command yang sebelumnya berstatus PendingConfirmation setelah Maxwell
@@ -27,7 +28,15 @@ public interface IAgentDispatcherService
     Task<CommandResultDto> ConfirmAndDispatchAsync(Guid commandId);
 
     /// <summary>
+    /// H2 Hardening: Membatalkan command yang masih berstatus PendingConfirmation.
+    /// Throws KeyNotFoundException jika tidak ditemukan.
+    /// Throws InvalidOperationException jika status bukan PendingConfirmation.
+    /// </summary>
+    Task CancelCommandAsync(Guid commandId);
+
+    /// <summary>
     /// Callback saat Maya.Agent mengembalikan hasil eksekusi command via SignalR.
     /// </summary>
     void HandleResult(CommandResultDto result);
 }
+

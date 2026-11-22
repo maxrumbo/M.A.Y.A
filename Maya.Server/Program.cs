@@ -3,17 +3,96 @@ using Maya.Server.Hubs;
 using Maya.Server.Middleware;
 using Maya.Server.Services;
 using Maya.Server.Services.Interfaces;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using System.Text;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Pastikan user-secrets selalu dimuat jika tersedia (baik lewat launchSettings maupun direct run)
 builder.Configuration.AddUserSecrets<Program>(optional: true);
 
+// ─── JWT Authentication (Phase 4) ─────────────────────────────────────────────
+// Baca Maya:JwtSecret dari user-secrets — WAJIB ada untuk proteksi seluruh /api/*
+var jwtSecret = builder.Configuration["Maya:JwtSecret"]
+    ?? throw new InvalidOperationException(
+        "Maya:JwtSecret belum dikonfigurasi. " +
+        "Jalankan: dotnet user-secrets set \"Maya:JwtSecret\" \"<min-32-char-secret>\" --project Maya.Server");
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer           = true,
+            ValidIssuer              = "maya-server",
+            ValidateAudience         = true,
+            ValidAudience            = "maya-client",
+            ValidateLifetime         = true,
+            ClockSkew                = TimeSpan.FromSeconds(30),
+            IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
+            ValidateIssuerSigningKey = true
+        };
+        // SignalR menggunakan query param untuk token (browser tidak bisa set header custom)
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = ctx =>
+            {
+                var token = ctx.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(token) &&
+                    ctx.HttpContext.Request.Path.StartsWithSegments("/hubs/maya"))
+                {
+                    ctx.Token = token;
+                }
+                return Task.CompletedTask;
+            }
+        };
+    });
+
+builder.Services.AddAuthorization();
+
+// ─── H3 Hardening: Rate Limiting di /api/auth/* ──────────────────────────────
+// Policy "AuthLimit"   : maks 5 req/menit per IP untuk seluruh /api/auth/*
+// Policy "StepUpLimit" : maks 3 req/menit per IP khusus /api/auth/step-up (cegah PIN brute-force)
+builder.Services.AddRateLimiter(options =>
+{
+    // General auth endpoints: 5 req/min/IP
+    options.AddFixedWindowLimiter("AuthLimit", limiterOptions =>
+    {
+        limiterOptions.PermitLimit         = 5;
+        limiterOptions.Window              = TimeSpan.FromMinutes(1);
+        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        limiterOptions.QueueLimit           = 0; // Tolak langsung jika penuh
+    });
+
+    // Step-up endpoint: 3 req/min/IP (lebih ketat karena verifikasi PIN)
+    options.AddFixedWindowLimiter("StepUpLimit", limiterOptions =>
+    {
+        limiterOptions.PermitLimit         = 3;
+        limiterOptions.Window              = TimeSpan.FromMinutes(1);
+        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        limiterOptions.QueueLimit           = 0;
+    });
+
+    // Respons 429 dengan Retry-After header
+    options.OnRejected = async (context, token) =>
+    {
+        context.HttpContext.Response.StatusCode = 429;
+        context.HttpContext.Response.Headers["Retry-After"] = "60";
+        await context.HttpContext.Response.WriteAsJsonAsync(new
+        {
+            error  = "Terlalu banyak percobaan.",
+            detail = "Batas permintaan autentikasi terlampaui. Coba lagi dalam 60 detik.",
+            retryAfterSeconds = 60
+        }, token);
+    };
+});
+
 // ─── Database ────────────────────────────────────────────────────────────────
-// Koneksi dibaca dari IConfiguration (dotnet user-secrets / Environment Variable).
-// TIDAK ADA hardcoded connection string di sini.
 builder.Services.AddDbContext<MayaDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
@@ -23,6 +102,18 @@ builder.Services.AddScoped<IMemoryService, MemoryService>();
 builder.Services.AddScoped<IVaultService, VaultService>();
 builder.Services.AddScoped<IGeminiService, GeminiService>();
 
+// ─── Phase 4: Auth Service ────────────────────────────────────────────────────
+builder.Services.AddScoped<IAuthService, AuthService>();
+
+// ─── Phase 4: Google Integration (opsional — fallback jika creds tidak ada) ──
+builder.Services.AddScoped<IGoogleIntegrationService, GoogleIntegrationService>();
+
+// ─── Phase 4: FCM Notification (opsional — fallback ke log jika tidak ada) ───
+builder.Services.AddScoped<IFcmNotificationService, FcmNotificationService>();
+
+// ─── Phase 4: Proactive Background Scheduler ─────────────────────────────────
+builder.Services.AddHostedService<ProactiveSchedulerService>();
+
 // ─── Real-Time SignalR Bridge & Agent Dispatcher (Phase 3) ───────────────────
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<IAgentDispatcherService, AgentDispatcherService>();
@@ -30,7 +121,7 @@ builder.Services.AddSingleton<IAgentDispatcherService, AgentDispatcherService>()
 // ─── Controllers ─────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
 
-// ─── Swagger / OpenAPI (dengan Bearer Auth support) ──────────────────────────
+// ─── Swagger / OpenAPI (dengan Bearer Auth + X-Step-Up-Token) ────────────────
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -41,7 +132,7 @@ builder.Services.AddSwaggerGen(c =>
         Description = "Maxwell Admires, Yet Awaits — Personal AI Assistant Backend API"
     });
 
-    // Konfigurasi Bearer Auth header di Swagger UI
+    // ─── Bearer JWT Auth ───────────────────────────────────────────────────
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Name         = "Authorization",
@@ -49,7 +140,30 @@ builder.Services.AddSwaggerGen(c =>
         Scheme       = "bearer",
         BearerFormat = "JWT",
         In           = ParameterLocation.Header,
-        Description  = "Masukkan JWT token. Format: Bearer {token}"
+        Description  = "JWT Bearer token. Login via POST /api/auth/login-pin → gunakan token di sini.\nFormat: Bearer {token}"
+    });
+
+    // ─── X-Step-Up-Token Header ────────────────────────────────────────────
+    c.AddSecurityDefinition("StepUpToken", new OpenApiSecurityScheme
+    {
+        Name        = "X-Step-Up-Token",
+        Type        = SecuritySchemeType.ApiKey,
+        In          = ParameterLocation.Header,
+        Description = "Step-Up Token (JWT 60 detik) untuk aksi sensitif.\n" +
+                      "Minta via POST /api/auth/step-up dengan PIN terbaru.\n" +
+                      "Diperlukan untuk: GET /api/vault/{id}/reveal dan POST /api/agent/commands/{id}/confirm"
+    });
+
+    // Apply keduanya sebagai global security requirement (Swagger UI akan tampilkan keduanya)
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
+            },
+            Array.Empty<string>()
+        }
     });
 
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
@@ -57,11 +171,7 @@ builder.Services.AddSwaggerGen(c =>
         {
             new OpenApiSecurityScheme
             {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id   = "Bearer"
-                }
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "StepUpToken" }
             },
             Array.Empty<string>()
         }
@@ -69,7 +179,6 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
-// Mengizinkan Laptop Web App (Vite dev) dan Android Mobile App (Capacitor).
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("MayaCorsPolicy", policy =>
@@ -119,15 +228,18 @@ app.UseHttpsRedirection();
 app.UseRouting();
 app.UseCors("MayaCorsPolicy");
 
-// Authentication & Authorization akan dikonfigurasi di Phase 4
-// app.UseAuthentication();
-// app.UseAuthorization();
+// H3 Hardening: Rate Limiting aktif
+app.UseRateLimiter();
+
+// Phase 4: Authentication & Authorization aktif
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<MayaHub>("/hubs/maya");
 
 // ─── Health Check Endpoint ─────────────────────────────────────────────────────
-// GET /health → mengecek konektivitas database secara aktif.
+// GET /health → mengecek konektivitas database secara aktif. PUBLIK (tanpa auth).
 app.MapGet("/health", async (MayaDbContext db, ILogger<Program> logger) =>
 {
     try

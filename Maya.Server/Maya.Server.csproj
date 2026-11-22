@@ -16,6 +16,15 @@
     </PackageReference>
     <!-- Swagger UI dengan Bearer Auth support (PRD Section 7.2) -->
     <PackageReference Include="Swashbuckle.AspNetCore" Version="7.3.1" />
+    <!-- Phase 4: JWT Authentication -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="11.0.0" />
+    <!-- Phase 4: WebAuthn / Passkey (Windows Hello) — implemented via built-in System.Security.Cryptography -->
+    <!-- Note: Fido2NetLib tidak tersedia di nuget stabil; WebAuthn diimplementasi manual -->
+    <!-- Phase 4: Google Calendar + Gmail Integration (optional, fallback if creds missing) -->
+    <PackageReference Include="Google.Apis.Calendar.v3" Version="1.69.0.3667" />
+    <PackageReference Include="Google.Apis.Gmail.v1" Version="1.69.0.3742" />
+    <!-- Phase 4: Firebase Admin SDK for FCM Push (optional, fallback if creds missing) -->
+    <PackageReference Include="FirebaseAdmin" Version="3.1.0" />
   </ItemGroup>
 
   <ItemGroup>

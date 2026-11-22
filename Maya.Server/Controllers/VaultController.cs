@@ -1,5 +1,7 @@
+using Maya.Server.Filters;
 using Maya.Server.Services.Interfaces;
 using Maya.Shared.DTOs.Vault;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Maya.Server.Controllers;
@@ -8,16 +10,17 @@ namespace Maya.Server.Controllers;
 /// Encrypted Password Vault API.
 ///
 /// SECURITY NOTES:
-/// - GET /api/vault         → hanya metadata (TANPA password)
-/// - POST /api/vault        → enkripsi AES-256-GCM sebelum simpan
-/// - GET /api/vault/{id}/reveal → plaintext dikembalikan ke client SETELAH
-///   verifikasi Step-Up Biometric (Phase 4). Saat ini belum diproteksi auth.
+/// - GET /api/vault            → hanya metadata (TANPA password) — perlu JWT
+/// - POST /api/vault           → enkripsi AES-256-GCM sebelum simpan — perlu JWT
+/// - GET /api/vault/{id}/reveal → WAJIB Step-Up Token (X-Step-Up-Token header, 60 detik)
+///   SELAIN Bearer JWT biasa — plaintext dikembalikan 15 detik sebelum UI sembunyikan
 ///
 /// Password TIDAK PERNAH dikirim ke Gemini LLM.
 /// </summary>
 [ApiController]
 [Route("api/vault")]
 [Produces("application/json")]
+[Authorize]
 public class VaultController : ControllerBase
 {
     private readonly IVaultService _vaultService;
@@ -59,12 +62,20 @@ public class VaultController : ControllerBase
     /// <summary>
     /// Dekripsi dan kembalikan password plaintext.
     ///
-    /// ⚠️  PHASE 4 TODO: Endpoint ini WAJIB diproteksi dengan Step-Up Biometric Token.
-    /// Saat ini hanya tersedia untuk testing Phase 2.
+    /// ⚠️  STEP-UP REQUIRED: Endpoint ini WAJIB menyertakan Step-Up Token di header.
+    ///
+    /// Alur:
+    ///   1. POST /api/auth/step-up dengan PIN terbaru → dapat StepUpToken
+    ///   2. GET /api/vault/{id}/reveal dengan headers:
+    ///        Authorization: Bearer {jwt}
+    ///        X-Step-Up-Token: {stepUpToken}
+    ///
     /// Password hanya tersedia selama 15 detik (ExpiresAt) sebelum UI menyembunyikannya.
     /// </summary>
     [HttpGet("{id:guid}/reveal")]
+    [RequireStepUp]
     [ProducesResponseType<VaultRevealResponseDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<VaultRevealResponseDto>> Reveal(Guid id)
     {

@@ -610,6 +610,44 @@ Mengunci seluruh sistem dengan autentikasi perangkat (Biometrik/PIN), menghidupk
 - [ ] M.A.Y.A. berhasil membaca jadwal Google Calendar dan email masuk via chat.
 - [ ] Test endpoint FCM Push berhasil memunculkan notifikasi di perangkat Android.
 
+## 11.4 Phase 4 Hardening (Post-Launch Improvements)
+
+> Penyesuaian keamanan dan UX yang ditambahkan setelah implementasi awal Phase 4.
+
+### H1: StepUpToken — Single-Use & Terikat `targetId`
+- `IssueStepUpTokenAsync` menerima parameter tambahan `targetId` (Guid command/vault yang akan diakses).
+- Token menyimpan claim `target_id` sehingga hanya bisa dipakai untuk **satu resource spesifik**.
+- `RequireStepUpAttribute` memvalidasi bahwa `target_id` di token cocok dengan `{id}` di route.
+- Setelah digunakan sekali (berhasil validasi), token langsung dianggap consumed via in-memory `HashSet<string>` keyed by `jti` claim. Token yang sama tidak bisa dipakai dua kali meski masih dalam 60 detik.
+- `StepUpConfirmRequestDto` diperluas: menambah field `TargetId` (Guid).
+
+### H2: Endpoint `POST /api/agent/commands/{id}/cancel`
+- Membatalkan command yang masih dalam status `PendingConfirmation`.
+- Mengubah status menjadi `Cancelled` di DB, menghapus TCS dari `_pendingCommands` jika ada.
+- Memerlukan JWT Bearer (tidak butuh Step-Up Token — cancel harus mudah dilakukan).
+- Return: `204 No Content` jika berhasil, `404` jika tidak ditemukan, `400` jika status bukan `PendingConfirmation`.
+- `IAgentDispatcherService` menambah method `CancelCommandAsync(Guid commandId)`.
+
+### H3: Rate Limiting di `/api/auth/*`
+- Gunakan built-in .NET 7+ `RateLimiter` (tersedia di ASP.NET Core 7+/11).
+- Policy **"AuthRateLimit"**: maks **5 request per menit** per IP untuk seluruh endpoint `/api/auth/*`.
+- Respons 429 Too Many Requests jika limit terlampaui, dengan header `Retry-After`.
+- Policy **"StepUpRateLimit"**: maks **3 request per menit** per IP khusus untuk `POST /api/auth/step-up`.
+- Dikonfigurasi di `Program.cs` via `builder.Services.AddRateLimiter(...)`.
+
+### H4: Guardrail `GeminiService` — Proteksi Memory & Klarifikasi Dampak
+1. **Blokir `save_memory` untuk data sensitif:**
+   - Sebelum `save_memory` dieksekusi, periksa apakah `value` mengandung pola berisiko (password, PIN, OTP, token, secret, api_key, private_key, ssh).
+   - Jika terdeteksi → tolak eksekusi, return error ke Gemini: `"DITOLAK: save_memory tidak boleh digunakan untuk menyimpan password, PIN, OTP, atau credential apapun."`
+   - Tambahkan instruksi larangan ini ke System Instruction secara eksplisit.
+2. **Wajib klarifikasi jika perintah ambigu:**
+   - Tambahkan ke System Instruction: jika perintah Maxwell ambigu (terutama aksi laptop, kirim email, atau akses vault), WAJIB tanya klarifikasi dahulu sebelum memanggil tool, jelaskan apa yang akan dilakukan dan dampaknya.
+
+### H5: Email Preview di `PendingActionDto` untuk `gmail_send_email`
+- `PendingActionDto` diperluas dengan field opsional `EmailPreview?` — object berisi `To`, `Subject`, `BodyPreview` (maks 200 char).
+- Ketika `gmail_send_email` memanggil `DispatchCommandAsync`, payload disertakan ke `PendingActionDto.EmailPreview`.
+- UI (Phase 5) akan menampilkan preview ini di dalam Step-Up Confirmation Card.
+
 ---
 
 # 12. PHASE 5: LAPTOP WEB APP (`maya-web`) & ANDROID MOBILE APP (`maya-mobile`)
@@ -652,19 +690,52 @@ Mengunci seluruh sistem dengan autentikasi perangkat (Biometrik/PIN), menghidupk
 - [ ] `maya-mobile` ter-compile menjadi Android project via Capacitor, biometrik HP berfungsi, dan notifikasi proaktif FCM masuk di *background*.
 - [ ] Alur *end-to-end* berhasil: Dari HP (di luar/kelas) → Chat M.A.Y.A. → Minta cek status laptop atau buka aplikasi → Konfirmasi biometrik untuk aksi sensitif → Laptop mengeksekusi.
 
+## 12.5 Phase 5 UX Improvements (Post-Launch)
+
+> Perbaikan UX yang ditambahkan berdasarkan feedback penggunaan awal.
+
+### U1: Status Aksi Real-Time di Confirmation Card
+- Tambahkan field `Status` ke `CommandLog` / `PendingActionDto` dengan nilai: `Waiting`, `Executing`, `Completed`, `Cancelled`.
+- UI memperbarui status secara real-time via SignalR event `CommandStatusChanged`.
+- Tombol **Cancel** tersedia selama status masih `Waiting` (memanggil `POST /api/agent/commands/{id}/cancel`).
+
+### U2: Auto-Hide Vault
+- Setelah Vault Reveal, UI otomatis menyembunyikan plaintext setelah waktu yang dikonfigurasi (default 15 detik dari `VaultRevealResponseDto.ExpiresAt`).
+- Countdown timer ditampilkan di samping password agar Maxwell tahu berapa detik tersisa.
+
+### U3: Snooze/Mute Notifikasi Proaktif
+- Tambahkan endpoint `POST /api/notifications/mute` — Maxwell bisa mute notifikasi proaktif untuk durasi tertentu (30 menit, 2 jam, sampai besok).
+- `ProactiveSchedulerService` cek status mute sebelum mengirim FCM.
+- UI memiliki tombol snooze di setiap notifikasi yang masuk.
+
+### U4: Chat Controls
+- **Stop Generation:** Tombol berhenti di chat saat M.A.Y.A. sedang mengetik (cancel inflight Gemini request).
+- **Copy:** Tombol copy di setiap bubble chat M.A.Y.A.
+- **Laptop Status Mini:** Indikator compact CPU/RAM/Baterai selalu terlihat di header chat (update tiap 30 detik via SignalR heartbeat).
+
 ---
 
-# 13. PHASE 6: FUTURE EXPANSION — VOICE, VOICEPRINT & VIDEO MULTIMODAL
+# 13. PHASE 6: FUTURE EXPANSION — VOICE & WAKE-WORD
 
 *(Fase ini dieksekusi setelah Phase 1–5 stabil di production)*
 
-## 13.1 Phase 6A: Real-Time Voice & Speaker Verification
-* **Audio Pipeline:** Menambahkan streaming audio (WebSockets / Gemini Multimodal Live API) untuk percakapan suara berlatensi rendah.
-* **Voiceprint Security:** Sebelum audio diproses menjadi perintah, *audio snippet* dikirim ke layanan *Speaker Verification* (embedding suara dibandingkan dengan *reference voiceprint* Maxwell). Jika *cosine similarity* di bawah threshold, M.A.Y.A. menolak merespons dan meminta verifikasi sandi/biometrik.
+## 13.1 Phase 6A: Voice In-App (Push-to-Talk & Hands-Free)
+* **Audio Pipeline In-App:** Streaming audio via WebSockets / Gemini Multimodal Live API untuk percakapan suara berlatensi rendah di dalam aplikasi (maya-web & maya-mobile).
+* **Mode Push-to-Talk:** Tahan tombol mikrofon → suara distream ke Gemini → respons M.A.Y.A. diputar via TTS.
+* **Mode Hands-Free:** Aktifkan mikrofon terus-menerus saat layar menyala; M.A.Y.A. mendeteksi jeda bicara dan merespons otomatis.
+* **Interrupt:** Maxwell bisa memotong respons M.A.Y.A. dengan berbicara kapan saja.
 * **UI:** Menambahkan *Voice Orb* minimalis yang bereaksi halus terhadap amplitudo suara M.A.Y.A.
+* **Voiceprint Security (In-App):** Sebelum audio diproses menjadi perintah, *audio snippet* dikirim ke layanan *Speaker Verification* (embedding suara dibandingkan dengan *reference voiceprint* Maxwell). Jika *cosine similarity* di bawah threshold, M.A.Y.A. menolak merespons.
 
-## 13.2 Phase 6B: Video & Visual Presence
-* Dukungan input kamera (M.A.Y.A. bisa melihat layar/dokumen lewat kamera HP) dan tampilan avatar visual yang tenang.
+## 13.2 Phase 6B: On-Device Wake-Word & Always-On Mode
+* **Wake-Word Engine:**
+  * **Android (`maya-mobile`):** Porcupine atau Sherpa-ONNX berjalan di Android Foreground Service — mendengarkan kata bangun *"Hey Maya"* bahkan saat layar mati, tanpa membebani baterai secara berlebihan.
+  * **Windows (`Maya.Agent`):** Proses latar belakang mendengarkan wake-word menggunakan Windows Audio API + Sherpa-ONNX on-device inference.
+* **Mode "Find-Me":**
+  * Maxwell memanggil nama M.A.Y.A. dari perangkat mana pun → server meneruskan sinyal ke semua perangkat Maxwell yang online.
+  * Laptop berbunyi (buzzer/notifikasi audio) agar mudah ditemukan di ruangan.
+  * Cross-device ping: "HP Maxwell berdering" dari laptop atau sebaliknya.
+* **Toggle Hemat Baterai:** Nonaktifkan wake-word saat baterai HP < 20% atau mode Do Not Disturb aktif, untuk memperpanjang daya tahan.
 
 ---
 

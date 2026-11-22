@@ -1,5 +1,6 @@
 using Maya.Server.Services.Interfaces;
 using Maya.Shared.DTOs.Memory;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Maya.Server.Controllers;
@@ -7,6 +8,7 @@ namespace Maya.Server.Controllers;
 [ApiController]
 [Route("api/memories")]
 [Produces("application/json")]
+[Authorize]
 public class MemoryController : ControllerBase
 {
     private readonly IMemoryService _memoryService;

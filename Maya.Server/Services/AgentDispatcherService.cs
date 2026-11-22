@@ -9,7 +9,6 @@ using Maya.Shared.DTOs.Chat;
 using Maya.Shared.Interfaces;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
-
 namespace Maya.Server.Services;
 
 /// <summary>
@@ -54,7 +53,8 @@ public class AgentDispatcherService : IAgentDispatcherService
         object payload,
         Guid? conversationId,
         bool requiresConfirmation,
-        string description)
+        string description,
+        EmailPreviewDto? emailPreview = null)
     {
         var commandId = Guid.NewGuid();
         var payloadJson = payload is string s ? s : JsonSerializer.Serialize(payload);
@@ -86,7 +86,8 @@ public class AgentDispatcherService : IAgentDispatcherService
                 CommandId: commandId,
                 CommandName: commandName,
                 Description: description,
-                RequiresBiometricConfirmation: true
+                RequiresBiometricConfirmation: true,
+                EmailPreview: emailPreview  // H5: sertakan email preview jika ada
             );
 
             return (Dispatched: false, PendingAction: pendingAction, Result: null);
@@ -127,6 +128,46 @@ public class AgentDispatcherService : IAgentDispatcherService
                 $"Command '{commandId}' tidak dalam status PendingConfirmation (status saat ini: {log.Status}).");
         }
 
+        // H5 Hardening & Google Integration: Eksekusi pengiriman email via server (bukan daemon laptop)
+        if (log.CommandName == "gmail_send_email")
+        {
+            var googleService = scope.ServiceProvider.GetRequiredService<IGoogleIntegrationService>();
+            if (!googleService.IsConfigured)
+            {
+                log.Status = "Failed";
+                log.ResultOutput = "Google integration belum dikonfigurasi.";
+                log.CompletedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync();
+                return new CommandResultDto(commandId, false, "Google integration belum dikonfigurasi.", DateTimeOffset.UtcNow);
+            }
+
+            try
+            {
+                using var doc = JsonDocument.Parse(log.PayloadJson);
+                var root = doc.RootElement;
+                var to = root.GetProperty("to").GetString() ?? "";
+                var subject = root.GetProperty("subject").GetString() ?? "";
+                var body = root.GetProperty("body").GetString() ?? "";
+
+                await googleService.SendEmailAsync(to, subject, body);
+
+                log.Status = "Completed";
+                log.ResultOutput = $"Email berhasil dikirim ke {to}.";
+                log.CompletedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync();
+
+                return new CommandResultDto(commandId, true, $"Email berhasil dikirim ke {to}.", DateTimeOffset.UtcNow);
+            }
+            catch (Exception ex)
+            {
+                log.Status = "Failed";
+                log.ResultOutput = $"Gagal mengirim email: {ex.Message}";
+                log.CompletedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync();
+                return new CommandResultDto(commandId, false, $"Gagal mengirim email: {ex.Message}", DateTimeOffset.UtcNow);
+            }
+        }
+
         var isOnline = await IsAgentOnlineAsync(DefaultLaptopDeviceId);
         if (!isOnline)
         {
@@ -154,6 +195,33 @@ public class AgentDispatcherService : IAgentDispatcherService
         {
             _logger.LogWarning("Menerima result untuk CommandId {Id} yang tidak ada di daftar pending.", result.CommandId);
         }
+    }
+
+    // H2 Hardening: Cancel PendingConfirmation command
+    public async Task CancelCommandAsync(Guid commandId)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MayaDbContext>();
+
+        var log = await db.CommandLogs.FindAsync(commandId)
+            ?? throw new KeyNotFoundException($"Command dengan ID '{commandId}' tidak ditemukan.");
+
+        if (log.Status != "PendingConfirmation")
+            throw new InvalidOperationException(
+                $"Command '{commandId}' tidak bisa dibatalkan — status saat ini: {log.Status}. " +
+                "Hanya command dengan status PendingConfirmation yang bisa dibatalkan.");
+
+        log.Status      = "Cancelled";
+        log.CompletedAt = DateTimeOffset.UtcNow;
+        log.ResultOutput = "Dibatalkan oleh Maxwell.";
+        await db.SaveChangesAsync();
+
+        // Jika ada TCS untuk command ini (seharusnya tidak ada karena pending = belum dispatch),
+        // pastikan dibersihkan agar tidak ada resource leak
+        if (_pendingCommands.TryRemove(commandId, out var tcs))
+            tcs.TrySetCanceled();
+
+        _logger.LogInformation("Command {CommandId} ({CommandName}) berhasil dibatalkan.", commandId, log.CommandName);
     }
 
     private async Task<CommandResultDto> SendAndAwaitResultAsync(

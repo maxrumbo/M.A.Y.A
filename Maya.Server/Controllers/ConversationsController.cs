@@ -1,5 +1,6 @@
 using Maya.Server.Data;
 using Maya.Shared.DTOs.Chat;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,6 +9,7 @@ namespace Maya.Server.Controllers;
 [ApiController]
 [Route("api/conversations")]
 [Produces("application/json")]
+[Authorize]
 public class ConversationsController : ControllerBase
 {
     private readonly MayaDbContext _db;

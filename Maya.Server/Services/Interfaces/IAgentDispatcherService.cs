@@ -1,0 +1,33 @@
+using Maya.Shared.DTOs.Agent;
+using Maya.Shared.DTOs.Chat;
+
+namespace Maya.Server.Services.Interfaces;
+
+public interface IAgentDispatcherService
+{
+    /// <summary>
+    /// Mengecek apakah Maya.Agent di laptop sedang online dan terhubung ke SignalR.
+    /// </summary>
+    Task<bool> IsAgentOnlineAsync(string deviceId = "maxwell-laptop");
+
+    /// <summary>
+    /// Dispatch command dari server ke Maya.Agent (atau membuat PendingAction jika High Risk).
+    /// </summary>
+    Task<(bool Dispatched, PendingActionDto? PendingAction, CommandResultDto? Result)> DispatchCommandAsync(
+        string commandName,
+        object payload,
+        Guid? conversationId,
+        bool requiresConfirmation,
+        string description);
+
+    /// <summary>
+    /// Mengeksekusi command yang sebelumnya berstatus PendingConfirmation setelah Maxwell
+    /// mengonfirmasi dengan verifikasi biometrik / Step-Up.
+    /// </summary>
+    Task<CommandResultDto> ConfirmAndDispatchAsync(Guid commandId);
+
+    /// <summary>
+    /// Callback saat Maya.Agent mengembalikan hasil eksekusi command via SignalR.
+    /// </summary>
+    void HandleResult(CommandResultDto result);
+}

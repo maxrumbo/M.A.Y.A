@@ -1,4 +1,5 @@
 using Maya.Server.Data;
+using Maya.Server.Hubs;
 using Maya.Server.Middleware;
 using Maya.Server.Services;
 using Maya.Server.Services.Interfaces;
@@ -21,6 +22,10 @@ builder.Services.AddHttpClient("Gemini");
 builder.Services.AddScoped<IMemoryService, MemoryService>();
 builder.Services.AddScoped<IVaultService, VaultService>();
 builder.Services.AddScoped<IGeminiService, GeminiService>();
+
+// ─── Real-Time SignalR Bridge & Agent Dispatcher (Phase 3) ───────────────────
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<IAgentDispatcherService, AgentDispatcherService>();
 
 // ─── Controllers ─────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
@@ -119,6 +124,7 @@ app.UseCors("MayaCorsPolicy");
 // app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<MayaHub>("/hubs/maya");
 
 // ─── Health Check Endpoint ─────────────────────────────────────────────────────
 // GET /health → mengecek konektivitas database secara aktif.

@@ -1,16 +1,38 @@
+using Maya.Agent.Services;
+
 namespace Maya.Agent;
 
-public class Worker(ILogger<Worker> logger) : BackgroundService
+public class Worker : BackgroundService
 {
+    private readonly SignalRClientService _signalRClient;
+    private readonly ILogger<Worker> _logger;
+
+    public Worker(SignalRClientService signalRClient, ILogger<Worker> logger)
+    {
+        _signalRClient = signalRClient;
+        _logger = logger;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        _logger.LogInformation("M.A.Y.A. Windows Local Daemon starting at: {time}", DateTimeOffset.Now);
+
+        await _signalRClient.StartAsync(stoppingToken);
+
+        // Pertahankan worker tetap aktif sampai aplikasi dihentikan
+        try
         {
-            if (logger.IsEnabled(LogLevel.Information))
-            {
-                logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
-            }
-            await Task.Delay(1000, stoppingToken);
+            await Task.Delay(Timeout.Infinite, stoppingToken);
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("M.A.Y.A. Windows Local Daemon stopping...");
+        }
+    }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await _signalRClient.StopAsync(cancellationToken);
+        await base.StopAsync(cancellationToken);
     }
 }

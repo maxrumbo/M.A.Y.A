@@ -1,15 +1,26 @@
 using Maya.Server.Data;
 using Maya.Server.Middleware;
+using Maya.Server.Services;
+using Maya.Server.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Pastikan user-secrets selalu dimuat jika tersedia (baik lewat launchSettings maupun direct run)
+builder.Configuration.AddUserSecrets<Program>(optional: true);
 
 // ─── Database ────────────────────────────────────────────────────────────────
 // Koneksi dibaca dari IConfiguration (dotnet user-secrets / Environment Variable).
 // TIDAK ADA hardcoded connection string di sini.
 builder.Services.AddDbContext<MayaDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// ─── HTTP Client & Services (Phase 2: Gemini Brain, Memory, Vault) ───────────
+builder.Services.AddHttpClient("Gemini");
+builder.Services.AddScoped<IMemoryService, MemoryService>();
+builder.Services.AddScoped<IVaultService, VaultService>();
+builder.Services.AddScoped<IGeminiService, GeminiService>();
 
 // ─── Controllers ─────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
@@ -75,6 +86,13 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 
 var app = builder.Build();
+
+// ─── Seed Initial Memories (Phase 2) ──────────────────────────────────────────
+using (var scope = app.Services.CreateScope())
+{
+    var memoryService = scope.ServiceProvider.GetRequiredService<IMemoryService>();
+    await memoryService.SeedInitialMemoriesAsync();
+}
 
 // ─── Middleware Pipeline ───────────────────────────────────────────────────────
 // GlobalExceptionMiddleware WAJIB paling awal agar menangkap semua exception.

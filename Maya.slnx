@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Maya.Agent/Maya.Agent.csproj" />
+  <Project Path="Maya.Server/Maya.Server.csproj" />
+  <Project Path="Maya.Shared/Maya.Shared.csproj" />
+</Solution>

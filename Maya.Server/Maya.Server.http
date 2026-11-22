@@ -1,0 +1,11 @@
+@Maya.Server_HostAddress = http://localhost:5063
+
+GET {{Maya.Server_HostAddress}}/openapi/v1.json
+Accept: application/json
+
+###
+
+GET {{Maya.Server_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

@@ -111,7 +111,8 @@ builder.Services.AddScoped<IGoogleIntegrationService, GoogleIntegrationService>(
 // ─── Phase 4: FCM Notification (opsional — fallback ke log jika tidak ada) ───
 builder.Services.AddScoped<IFcmNotificationService, FcmNotificationService>();
 
-// ─── Phase 4: Proactive Background Scheduler ─────────────────────────────────
+// ─── Phase 4 & 5: Notification Mute & Proactive Background Scheduler ──────────
+builder.Services.AddSingleton<INotificationMuteService, NotificationMuteService>();
 builder.Services.AddHostedService<ProactiveSchedulerService>();
 
 // ─── Real-Time SignalR Bridge & Agent Dispatcher (Phase 3) ───────────────────
@@ -186,6 +187,8 @@ builder.Services.AddCors(options =>
         policy
             .WithOrigins(
                 "http://localhost:5173",    // maya-web (Vite dev server)
+                "http://localhost",         // local preview / web server
+                "http://localhost:3000",    // alternative local web port
                 "capacitor://localhost"     // maya-mobile (Capacitor Android)
             )
             .AllowAnyHeader()

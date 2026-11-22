@@ -23,6 +23,7 @@ namespace Maya.Server.Services;
 public class ProactiveSchedulerService : BackgroundService, IProactiveSchedulerService
 {
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly INotificationMuteService _muteService;
     private readonly ILogger<ProactiveSchedulerService> _logger;
 
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
@@ -36,9 +37,11 @@ public class ProactiveSchedulerService : BackgroundService, IProactiveSchedulerS
 
     public ProactiveSchedulerService(
         IServiceScopeFactory scopeFactory,
+        INotificationMuteService muteService,
         ILogger<ProactiveSchedulerService> logger)
     {
         _scopeFactory = scopeFactory;
+        _muteService  = muteService;
         _logger       = logger;
     }
 
@@ -63,6 +66,14 @@ public class ProactiveSchedulerService : BackgroundService, IProactiveSchedulerS
 
     private async Task RunChecksAsync(CancellationToken cancellationToken)
     {
+        // U3: Jika notifikasi sedang di-snooze / di-mute, jangan jalankan pengiriman proaktif
+        if (_muteService.IsMuted)
+        {
+            _logger.LogInformation("ProactiveScheduler: Notifikasi sedang di-mute ({Minutes}m tersisa). Skip checks.",
+                _muteService.RemainingMinutes);
+            return;
+        }
+
         var nowWib = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, WibZone);
         var todayWib = DateOnly.FromDateTime(nowWib);
 

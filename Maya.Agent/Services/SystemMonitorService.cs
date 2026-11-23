@@ -20,6 +20,7 @@ public class SystemMonitorService : IDisposable
     private double _lastCpu = 0.0;
     private double _lastRam = 0.0;
     private int _lastBattery = 100;
+    private bool _isCharging = true;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
     private class MEMORYSTATUSEX
@@ -96,6 +97,37 @@ public class SystemMonitorService : IDisposable
         );
     }
 
+    /// <summary>
+    /// Phase 6B: Mengambil persentase baterai dan status pengisian daya (AC line) terkini
+    /// untuk logika Mode Hemat Baterai pada WakeWordListenerService.
+    /// </summary>
+    public (int BatteryPercent, bool IsCharging) GetBatteryStatus()
+    {
+        CollectBatteryMetrics();
+        return (_lastBattery, _isCharging);
+    }
+
+    private void CollectBatteryMetrics()
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows() && GetSystemPowerStatus(out var sps))
+            {
+                if (sps.BatteryLifePercent != 255) // 255 = unknown/desktop
+                {
+                    _lastBattery = sps.BatteryLifePercent;
+                }
+
+                // ACLineStatus: 0 = Offline (baterai), 1 = Online (charging), 255 = Unknown (anggap AC/desktop)
+                _isCharging = sps.ACLineStatus != 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Gagal membaca status baterai Windows.");
+        }
+    }
+
     private void CollectMetrics()
     {
         try
@@ -116,17 +148,8 @@ public class SystemMonitorService : IDisposable
                 }
             }
 
-            // 3. Battery
-            if (OperatingSystem.IsWindows())
-            {
-                if (GetSystemPowerStatus(out var sps))
-                {
-                    if (sps.BatteryLifePercent != 255) // 255 = unknown/desktop
-                    {
-                        _lastBattery = sps.BatteryLifePercent;
-                    }
-                }
-            }
+            // 3. Battery & Charging Status
+            CollectBatteryMetrics();
         }
         catch (Exception ex)
         {

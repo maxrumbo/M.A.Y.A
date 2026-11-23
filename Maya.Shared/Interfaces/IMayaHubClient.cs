@@ -25,4 +25,19 @@ public interface IMayaHubClient
     /// (misal: PendingConfirmation → Dispatched → Completed).
     /// </summary>
     Task CommandStatusUpdated(Guid commandId, string status, string? output);
+
+    /// <summary>
+    /// Phase 6B: Dikirim server ke Maya.Agent saat pengaturan wake-word / hemat baterai berubah atau saat Agent connect.
+    /// </summary>
+    Task AgentSettingsChanged(AgentSettingsDto settings);
+
+    /// <summary>
+    /// Phase 6B: Dibroadcast ke Web/Mobile UI saat status listener wake-word di laptop berubah.
+    /// </summary>
+    Task WakeWordStatusChanged(WakeWordStatusDto status);
+
+    /// <summary>
+    /// Phase 6B: Dibroadcast ke Web/Mobile UI saat Maya.Agent mendeteksi frasa wake-word.
+    /// </summary>
+    Task WakeWordHeard(string phrase, DateTimeOffset timestamp);
 }

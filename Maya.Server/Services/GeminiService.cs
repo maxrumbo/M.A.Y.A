@@ -23,6 +23,7 @@ public class GeminiService : IGeminiService
     private readonly IConfiguration _config;
     private readonly IMemoryService _memoryService;
     private readonly IAgentDispatcherService _dispatcher;
+    private readonly IAgentSettingsService _agentSettings;
     private readonly IGoogleIntegrationService _googleService;
     private readonly MayaDbContext _db;
     private readonly ILogger<GeminiService> _logger;
@@ -46,6 +47,7 @@ public class GeminiService : IGeminiService
         IConfiguration config,
         IMemoryService memoryService,
         IAgentDispatcherService dispatcher,
+        IAgentSettingsService agentSettings,
         IGoogleIntegrationService googleService,
         MayaDbContext db,
         ILogger<GeminiService> logger)
@@ -54,6 +56,7 @@ public class GeminiService : IGeminiService
         _config            = config;
         _memoryService     = memoryService;
         _dispatcher        = dispatcher;
+        _agentSettings     = agentSettings;
         _googleService     = googleService;
         _db                = db;
         _logger            = logger;
@@ -273,6 +276,7 @@ public class GeminiService : IGeminiService
             ## Kontrol Laptop & Perintah Lokal
             - Kamu terhubung ke laptop Windows Maxwell melalui daemon Maya.Agent.
             - Kamu bisa membuka aplikasi kerja/ngoding, membuka URL di browser, menjalankan workflow Git, memeriksa telemetri sistem (CPU, RAM, Baterai), serta mengatur daya atau media.
+            - Kamu juga bisa membantu mencari perangkat Maxwell menggunakan tool find_my_device (misal saat Maxwell bertanya "di mana laptopku?", "bunyiin laptop", atau "cari HP-ku").
             - Jika laptop sedang offline, beri tahu Maxwell dengan sopan bahwa laptopnya belum terhubung.
 
             ## Batasan Ketat (JANGAN DILANGGAR)
@@ -468,6 +472,21 @@ public class GeminiService : IGeminiService
             ),
 
             new GeminiFunctionDeclaration(
+                Name:        "find_my_device",
+                Description: "Membunyikan alarm ping dan suara lantang di perangkat Maxwell untuk membantu menemukannya (Mode Find-Me). Low-Risk, langsung dieksekusi tanpa konfirmasi PIN.",
+                Parameters: new
+                {
+                    type = "OBJECT",
+                    properties = new
+                    {
+                        device = new { type = "STRING", description = "Perangkat yang ingin dicari/dibunyikan", @enum = new[] { "laptop", "phone" } },
+                        duration_seconds = new { type = "INTEGER", description = "Durasi alarm dalam detik (opsional, default 10, maksimal 30)" }
+                    },
+                    required = new[] { "device" }
+                }
+            ),
+
+            new GeminiFunctionDeclaration(
                 Name:        "gmail_list_unread",
                 Description: "Membaca daftar email belum-dibaca dari Gmail Maxwell (subjek, pengirim, cuplikan).",
                 Parameters: new
@@ -544,6 +563,7 @@ public class GeminiService : IGeminiService
             "git_workflow"         => await HandleGitWorkflowAsync(args, conversationId),
             "power_control"        => await HandlePowerControlAsync(args, conversationId),
             "control_laptop_media" => await HandleControlLaptopMediaAsync(args, conversationId),
+            "find_my_device"       => await HandleFindMyDeviceAsync(args, conversationId),
             "gmail_list_unread"    => await HandleGmailListUnreadAsync(args),
             "gmail_send_email"     => await HandleGmailSendEmailAsync(args, conversationId),
             "calendar_get_events"  => await HandleCalendarGetEventsAsync(args),
@@ -683,6 +703,59 @@ public class GeminiService : IGeminiService
         );
 
         return (result?.Output ?? $"Catatan '{title}' berhasil ditulis dan dibuka di Notepad laptop Maxwell.", null);
+    }
+
+    private async Task<(string ToolResult, PendingActionDto? PendingAction)> HandleFindMyDeviceAsync(
+        JsonElement args, Guid conversationId)
+    {
+        var device = args.TryGetProperty("device", out var dEl)
+            ? dEl.GetString()?.Trim().ToLowerInvariant() ?? "laptop"
+            : "laptop";
+
+        if (device == "phone")
+        {
+            return (
+                "Perangkat HP Android Maxwell belum terhubung untuk fitur Find-Me. " +
+                "Fitur ping HP akan tersedia setelah Phase Android (Capacitor + FCM) diaktifkan.",
+                null
+            );
+        }
+
+        if (device != "laptop")
+        {
+            return ($"Perangkat '{device}' tidak dikenal. Gunakan 'laptop' atau 'phone'.", null);
+        }
+
+        if (!await _dispatcher.IsAgentOnlineAsync())
+        {
+            return ("Laptop Maxwell sedang offline, jadi tidak bisa dibunyikan saat ini.", null);
+        }
+
+        var rawDuration = args.TryGetProperty("duration_seconds", out var sEl) && sEl.ValueKind == JsonValueKind.Number
+            ? sEl.GetInt32()
+            : 10;
+        var duration = Math.Clamp(rawDuration, 1, 30);
+
+        if (!_agentSettings.TryAcquireFindMeCooldown(duration, out var retryAfter))
+        {
+            return ($"Laptop baru saja dibunyikan. Tunggu {retryAfter} detik lagi sebelum memicu Find-Me kembali.", null);
+        }
+
+        var (_, _, result) = await _dispatcher.DispatchCommandAsync(
+            "find_my_device",
+            new { durationSeconds = duration },
+            conversationId,
+            requiresConfirmation: false,
+            $"Bunyikan alarm Find-Me di laptop ({duration} detik)"
+        );
+
+        if (result is null || !result.IsSuccess)
+        {
+            _agentSettings.MarkFindMeStopped();
+            return (result?.Output ?? "Gagal membunyikan laptop Maxwell.", null);
+        }
+
+        return (result.Output, null);
     }
 
     private async Task<(string ToolResult, PendingActionDto? PendingAction)> HandleOpenLaptopUrlAsync(

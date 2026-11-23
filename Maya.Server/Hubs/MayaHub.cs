@@ -20,6 +20,7 @@ public class MayaHub : Hub<IMayaHubClient>
     private readonly IConfiguration _config;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IAgentDispatcherService _dispatcher;
+    private readonly IAgentSettingsService _agentSettings;
     private readonly ILogger<MayaHub> _logger;
 
     private const string LaptopGroup = "LaptopAgent";
@@ -29,11 +30,13 @@ public class MayaHub : Hub<IMayaHubClient>
         IConfiguration config,
         IServiceScopeFactory scopeFactory,
         IAgentDispatcherService dispatcher,
+        IAgentSettingsService agentSettings,
         ILogger<MayaHub> logger)
     {
         _config = config;
         _scopeFactory = scopeFactory;
         _dispatcher = dispatcher;
+        _agentSettings = agentSettings;
         _logger = logger;
     }
 
@@ -91,6 +94,9 @@ public class MayaHub : Hub<IMayaHubClient>
                 BatteryPercent: device.BatteryPercent,
                 LastSeenAt: device.LastSeenAt
             ));
+
+            // Phase 6B: Push pengaturan wake-word & hemat baterai terakhir ke Agent yang baru terhubung
+            await Clients.Caller.AgentSettingsChanged(_agentSettings.GetSettings());
         }
         else
         {
@@ -128,6 +134,10 @@ public class MayaHub : Hub<IMayaHubClient>
                     LastSeenAt: now
                 ));
             }
+
+            // Phase 6B: Tandai status wake-word offline & broadcast ke UI
+            _agentSettings.MarkAgentOffline();
+            await Clients.Others.WakeWordStatusChanged(_agentSettings.GetWakeWordStatus());
         }
 
         await base.OnDisconnectedAsync(exception);
@@ -216,5 +226,44 @@ public class MayaHub : Hub<IMayaHubClient>
             result.IsSuccess ? "Completed" : "Failed",
             result.Output
         );
+    }
+
+    /// <summary>
+    /// Phase 6B: Dipanggil oleh Maya.Agent saat status listener wake-word berubah
+    /// (Active / PausedBattery / Disabled / Unsupported).
+    /// </summary>
+    public async Task ReportWakeWordStatus(WakeWordStatusDto status)
+    {
+        if (!Context.Items.ContainsKey("IsAgent"))
+        {
+            _logger.LogWarning("ReportWakeWordStatus diabaikan: bukan dari Maya.Agent terautentikasi.");
+            return;
+        }
+
+        _agentSettings.UpdateWakeWordStatus(status);
+        var merged = _agentSettings.GetWakeWordStatus();
+
+        _logger.LogInformation("WakeWordStatus dari Agent: {State} ({Engine}) - {Reason}",
+            merged.State, merged.Engine, merged.Reason ?? "-");
+
+        await Clients.Others.WakeWordStatusChanged(merged);
+    }
+
+    /// <summary>
+    /// Phase 6B: Dipanggil oleh Maya.Agent saat frasa wake-word dikenali secara lokal.
+    /// </summary>
+    public async Task ReportWakeWordHeard(string phrase, DateTimeOffset timestamp)
+    {
+        if (!Context.Items.ContainsKey("IsAgent"))
+        {
+            _logger.LogWarning("ReportWakeWordHeard diabaikan: bukan dari Maya.Agent terautentikasi.");
+            return;
+        }
+
+        _agentSettings.RecordWakeWordHeard(phrase, timestamp);
+        _logger.LogInformation("WakeWordHeard dari Agent: '{Phrase}' pada {Time}", phrase, timestamp);
+
+        await Clients.Others.WakeWordHeard(phrase, timestamp);
+        await Clients.Others.WakeWordStatusChanged(_agentSettings.GetWakeWordStatus());
     }
 }

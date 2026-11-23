@@ -1,3 +1,4 @@
+using Maya.Agent.WakeWord;
 using Maya.Shared.DTOs.Agent;
 using Microsoft.AspNetCore.SignalR.Client;
 
@@ -8,7 +9,8 @@ namespace Maya.Agent.Services;
 /// Fitur:
 /// - Header autentikasi X-Agent-Secret
 /// - WithAutomaticReconnect() untuk koneksi lab/kampus yang dinamis
-/// - Listener ExecuteCommand
+/// - Listener ExecuteCommand & AgentSettingsChanged (Phase 6B)
+/// - Pelaporan WakeWordStatus & WakeWordHeard ke server (Phase 6B)
 /// - Heartbeat telemetri berkala (setiap 30 detik)
 /// </summary>
 public class SignalRClientService : IAsyncDisposable
@@ -16,6 +18,8 @@ public class SignalRClientService : IAsyncDisposable
     private readonly IConfiguration _config;
     private readonly CommandExecutorService _executor;
     private readonly SystemMonitorService _monitor;
+    private readonly AgentSettingsStore _settingsStore;
+    private readonly WakeWordListenerService _wakeWordListener;
     private readonly ILogger<SignalRClientService> _logger;
 
     private HubConnection? _hubConnection;
@@ -26,12 +30,19 @@ public class SignalRClientService : IAsyncDisposable
         IConfiguration config,
         CommandExecutorService executor,
         SystemMonitorService monitor,
+        AgentSettingsStore settingsStore,
+        WakeWordListenerService wakeWordListener,
         ILogger<SignalRClientService> logger)
     {
         _config = config;
         _executor = executor;
         _monitor = monitor;
+        _settingsStore = settingsStore;
+        _wakeWordListener = wakeWordListener;
         _logger = logger;
+
+        _wakeWordListener.StatusChanged += status => _ = ReportWakeWordStatusAsync(status);
+        _wakeWordListener.WakeWordHeard += (phrase, ts) => _ = ReportWakeWordHeardAsync(phrase, ts);
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -79,16 +90,25 @@ public class SignalRClientService : IAsyncDisposable
             }
         });
 
+        // Phase 6B: Handler pengaturan wake-word & hemat baterai dari Maya.Server
+        _hubConnection.On<AgentSettingsDto>("AgentSettingsChanged", (settings) =>
+        {
+            _logger.LogInformation(
+                "Menerima AgentSettingsChanged dari server: WakeWord={Wake}, BatterySaver={Saver}, Threshold={Thr}%",
+                settings.WakeWordEnabled, settings.BatterySaverEnabled, settings.BatteryThresholdPercent);
+            _settingsStore.Update(settings);
+        });
+
         _hubConnection.Reconnecting += error =>
         {
             _logger.LogWarning("Koneksi SignalR ke server terputus. Mencoba reconnect otomatis... Error: {Msg}", error?.Message);
             return Task.CompletedTask;
         };
 
-        _hubConnection.Reconnected += connectionId =>
+        _hubConnection.Reconnected += async connectionId =>
         {
             _logger.LogInformation("Koneksi SignalR berhasil tersambung kembali. New connection ID: {Id}", connectionId);
-            return Task.CompletedTask;
+            await ReportWakeWordStatusAsync(_wakeWordListener.CurrentStatus);
         };
 
         _hubConnection.Closed += error =>
@@ -102,8 +122,9 @@ public class SignalRClientService : IAsyncDisposable
             await _hubConnection.StartAsync(cancellationToken);
             _logger.LogInformation("Berhasil terhubung ke MayaHub via SignalR! (State: {State})", _hubConnection.State);
 
-            // Kirim heartbeat pertama segera setelah terhubung
+            // Kirim heartbeat pertama & status wake-word segera setelah terhubung
             await SendHeartbeatAsync();
+            await ReportWakeWordStatusAsync(_wakeWordListener.CurrentStatus);
 
             // Mulai loop heartbeat berkala
             _heartbeatCts = new CancellationTokenSource();
@@ -143,6 +164,36 @@ public class SignalRClientService : IAsyncDisposable
         await _hubConnection.InvokeAsync("SendHeartbeat", stats);
         _logger.LogDebug("Heartbeat terkirim: CPU={Cpu}%, RAM={Ram}%, Bat={Bat}%",
             stats.CpuUsagePercent, stats.RamUsagePercent, stats.BatteryPercent);
+    }
+
+    private async Task ReportWakeWordStatusAsync(WakeWordStatusDto status)
+    {
+        try
+        {
+            if (_hubConnection?.State == HubConnectionState.Connected)
+            {
+                await _hubConnection.InvokeAsync("ReportWakeWordStatus", status);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Gagal melaporkan WakeWordStatus ke MayaHub.");
+        }
+    }
+
+    private async Task ReportWakeWordHeardAsync(string phrase, DateTimeOffset timestamp)
+    {
+        try
+        {
+            if (_hubConnection?.State == HubConnectionState.Connected)
+            {
+                await _hubConnection.InvokeAsync("ReportWakeWordHeard", phrase, timestamp);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Gagal melaporkan WakeWordHeard ke MayaHub.");
+        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)

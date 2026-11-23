@@ -65,3 +65,29 @@ export interface MuteStatus {
   mutedUntil: string | null;
   remainingMinutes: number;
 }
+
+export interface AgentSettings {
+  wakeWordEnabled: boolean;
+  batterySaverEnabled: boolean;
+  batteryThresholdPercent: number;
+}
+
+export interface WakeWordStatus {
+  state: 'Active' | 'PausedBattery' | 'Disabled' | 'Unsupported' | string;
+  engine: string;
+  reason?: string | null;
+  updatedAt: string;
+  lastHeardPhrase?: string | null;
+  lastHeardAt?: string | null;
+}
+
+export interface WakeWordStateResponse {
+  settings: AgentSettings;
+  status: WakeWordStatus;
+  isFindMeActive: boolean;
+}
+
+export interface WakeWordHeardEvent {
+  phrase: string;
+  timestamp: string;
+}

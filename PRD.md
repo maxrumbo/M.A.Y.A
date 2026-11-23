@@ -727,15 +727,31 @@ Mengunci seluruh sistem dengan autentikasi perangkat (Biometrik/PIN), menghidupk
 * **UI:** Menambahkan *Voice Orb* minimalis yang bereaksi halus terhadap amplitudo suara M.A.Y.A.
 * **Voiceprint Security (In-App):** Sebelum audio diproses menjadi perintah, *audio snippet* dikirim ke layanan *Speaker Verification* (embedding suara dibandingkan dengan *reference voiceprint* Maxwell). Jika *cosine similarity* di bawah threshold, M.A.Y.A. menolak merespons.
 
-## 13.2 Phase 6B: On-Device Wake-Word & Always-On Mode
-* **Wake-Word Engine:**
-  * **Android (`maya-mobile`):** Porcupine atau Sherpa-ONNX berjalan di Android Foreground Service — mendengarkan kata bangun *"Hey Maya"* bahkan saat layar mati, tanpa membebani baterai secara berlebihan.
-  * **Windows (`Maya.Agent`):** Proses latar belakang mendengarkan wake-word menggunakan Windows Audio API + Sherpa-ONNX on-device inference.
-* **Mode "Find-Me":**
-  * Maxwell memanggil nama M.A.Y.A. dari perangkat mana pun → server meneruskan sinyal ke semua perangkat Maxwell yang online.
-  * Laptop berbunyi (buzzer/notifikasi audio) agar mudah ditemukan di ruangan.
-  * Cross-device ping: "HP Maxwell berdering" dari laptop atau sebaliknya.
-* **Toggle Hemat Baterai:** Nonaktifkan wake-word saat baterai HP < 20% atau mode Do Not Disturb aktif, untuk memperpanjang daya tahan.
+## 13.2 Phase 6B: On-Device Wake-Word & Mode "Find-Me"
+* **Wake-Word Engine (Windows — `Maya.Agent`):**
+  * **Interface Modular (`IWakeWordEngine`):** Abstraksi *pluggable* (`Start`, `Stop`, `Pause`, event `WakeWordDetected`) sehingga mudah berpindah antar engine (Windows Speech, Picovoice Porcupine, atau Sherpa-ONNX) tanpa mengubah orkestrasi.
+  * **Default Lokal Gratis (Tanpa API Key):** `WindowsSpeechWakeWordEngine` berbasis `System.Speech` dengan *closed grammar* (frasa terbatas: *"maya"*, *"hey maya"*, *"maya kamu di mana"*, *"maya where are you"*, *"maya stop"*) dan threshold confidence default `0.80` (configurable).
+  * **Privasi (Opt-in):** Listener **default OFF** sampai Maxwell mengaktifkannya di UI. Audio diproses sepenuhnya secara lokal, tidak direkam, dan tidak dikirim ke cloud.
+  * **Anti-Echo & Cooldown:** Recognizer dijeda otomatis saat `Maya.Agent` sedang bersuara/ping (anti-echo) dan menerapkan cooldown 5–10 detik pasca trigger.
+  * **Degradasi Aman:** Jika recognizer Windows atau mikrofon tidak tersedia, listener melaporkan status `Unsupported` tanpa mengganggu daemon maupun fitur Find-Me via server.
+* **Mode "Find-Me" (Nyaut & Cross-Device Ping):**
+  * **Lokal via Suara:** Mendengar *"Maya, kamu di mana?"* / *"Maya, where are you?"* langsung memicu alarm & respons suara.
+  * **Cross-Device Ping (`Maya.Server` + SignalR + Gemini):**
+    * Tool Gemini `find_my_device(device: "laptop" | "phone")` (Low-Risk, tanpa Step-Up; untuk `"phone"` mengembalikan pesan informatif sampai Phase Android aktif).
+    * Endpoint REST `POST /api/agent/find-me` (default durasi 10 detik, maks 30 detik; mengembalikan `409 Conflict` jika offline dan `429 Too Many Requests` jika terkena cooldown) serta `POST /api/agent/find-me/stop`.
+    * **Audio Alert & Restore Volume (`NAudio`):** Menyimpan volume & status mute awal → unmute & naikkan volume minimal ke 80% → memutar pola ping 3 nada + TTS *"Aku di sini, Max!"* → **selalu mengembalikan volume & status mute ke kondisi semula** di blok `finally` saat selesai, dihentikan, atau error.
+* **Pengaturan & Mode Hemat Baterai:**
+  * Sumber kebenaran pengaturan (`WakeWordEnabled`, `BatterySaverEnabled`, `BatteryThresholdPercent`) disimpan di file JSON pada `Maya.Server` (`agent-settings.json`, tanpa migrasi DB), didorong via SignalR (`AgentSettingsChanged`) saat `Maya.Agent` connect, dan di-cache lokal di `%LOCALAPPDATA%\Maya\agent-settings.json`.
+  * Endpoint `GET /api/agent/wake-word` & `PUT /api/agent/wake-word` serta kontrol UI di `LaptopControlView.tsx` (tombol **Find My Laptop** + **Stop**, toggle **Wake-Word Listener**, toggle **Mode Hemat Baterai**, status real-time `Active` / `PausedBattery` / `Disabled` / `Unsupported`, dan indikator frasa terakhir terdengar).
+  * **Hemat Baterai Otomatis:** Pause listener saat baterai laptop `< 20%` dan tidak sedang di-charge (`ACLineStatus == 0`), lalu auto-resume saat baterai `≥ 25%` (hysteresis) atau charger tersambung.
+* **Blueprint Kesiapan Android (`maya-mobile` — Tahap Build APK Mendatang):**
+  * **Plugin Capacitor Kustom (`MayaWakeWord` — Kotlin):** Membungkus Android `ForegroundService` bertipe `microphone` dengan notifikasi persisten (*"M.A.Y.A. mendengarkan"*, wajib di Android 14+) serta izin `FOREGROUND_SERVICE_MICROPHONE` dan `RECORD_AUDIO`.
+  * **Engine On-Device:** Sherpa-ONNX KWS (Apache-2.0, gratis & offline) sebagai default, atau Porcupine Android jika `AccessKey` tersedia — keduanya mengikuti kontrak event yang sama dengan `IWakeWordEngine`.
+  * **Alur Interaksi:** Wake-word terdeteksi → bunyi ding → emit event ke WebView → `maya-client` memicu sesi Voice 6A (`startListening()`); untuk frasa *"kamu di mana"* langsung memanggil `POST /api/agent/find-me`.
+  * **Find-Me ke HP:** Server mengirim FCM *high-priority data message* (`type: "find_me"`) → `FirebaseMessagingService` membunyikan ringtone lewat `STREAM_ALARM` pada volume maksimal (izin akses Do-Not-Disturb diminta sekali di setelan agar bisa menembus mode senyap).
+  * **Hemat Baterai & DND Android:** Memantau `BatteryManager` (pause `< 20%`), menghormati `NotificationManager.currentInterruptionFilter` (DND), dan `BootReceiver` opsional untuk auto-start, dikendalikan oleh toggle yang sama di UI.
+* **Item Ditunda (Di Luar Scope 6B Awal):**
+  * Dictation perintah bebas pasca wake-word ke Gemini, Voiceprint Speaker Verification, adapter Porcupine (ditambahkan saat `AccessKey` tersedia), serta implementasi kode native Android (di luar blueprint di atas).
 
 ---
 

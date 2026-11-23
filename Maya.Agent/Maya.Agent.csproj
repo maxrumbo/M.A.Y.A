@@ -10,7 +10,9 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="11.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="11.0.0" />
+    <PackageReference Include="NAudio" Version="3.3.0" />
     <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="11.0.0" />
+    <PackageReference Include="System.Speech" Version="11.0.0" />
   </ItemGroup>
 
   <ItemGroup>

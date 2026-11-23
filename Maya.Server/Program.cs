@@ -115,9 +115,10 @@ builder.Services.AddScoped<IFcmNotificationService, FcmNotificationService>();
 builder.Services.AddSingleton<INotificationMuteService, NotificationMuteService>();
 builder.Services.AddHostedService<ProactiveSchedulerService>();
 
-// ─── Real-Time SignalR Bridge & Agent Dispatcher (Phase 3) ───────────────────
+// ─── Real-Time SignalR Bridge & Agent Dispatcher (Phase 3 & 6B) ──────────────
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<IAgentDispatcherService, AgentDispatcherService>();
+builder.Services.AddSingleton<IAgentSettingsService, AgentSettingsService>();
 
 // ─── Controllers ─────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
@@ -179,18 +180,40 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// ─── CORS ─────────────────────────────────────────────────────────────────────
+// ─── CORS (Localhost, Capacitor & Wi-Fi LAN RFC1918) ─────────────────────────
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("MayaCorsPolicy", policy =>
     {
         policy
-            .WithOrigins(
-                "http://localhost:5173",    // maya-web (Vite dev server)
-                "http://localhost",         // local preview / web server
-                "http://localhost:3000",    // alternative local web port
-                "capacitor://localhost"     // maya-mobile (Capacitor Android)
-            )
+            .SetIsOriginAllowed(origin =>
+            {
+                if (string.IsNullOrWhiteSpace(origin)) return false;
+                if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
+
+                var host = uri.Host;
+
+                // Izinkan localhost & Capacitor/Ionic mobile app
+                if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                    host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                    uri.Scheme.Equals("capacitor", StringComparison.OrdinalIgnoreCase) ||
+                    uri.Scheme.Equals("ionic", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                // Izinkan akses dari perangkat HP/laptop lain di jaringan Wi-Fi LAN lokal (RFC1918)
+                if (System.Net.IPAddress.TryParse(host, out var ip) &&
+                    ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                {
+                    var bytes = ip.GetAddressBytes();
+                    if (bytes[0] == 10) return true;
+                    if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true;
+                    if (bytes[0] == 192 && bytes[1] == 168) return true;
+                }
+
+                return false;
+            })
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();            // Diperlukan untuk SignalR WebSocket

@@ -1,6 +1,6 @@
 import * as signalR from '@microsoft/signalr';
 import { API_BASE_URL, authStorage } from '../api/client';
-import type { DeviceStatus } from '../types';
+import type { DeviceStatus, WakeWordStatus, WakeWordHeardEvent } from '../types';
 
 class SignalRService {
   private connection: signalR.HubConnection | null = null;
@@ -8,10 +8,14 @@ class SignalRService {
     statusChange: Array<(status: DeviceStatus) => void>;
     commandStatus: Array<(data: { commandId: string; status: string; output?: string }) => void>;
     connected: Array<(isConnected: boolean) => void>;
+    wakeWordStatus: Array<(status: WakeWordStatus) => void>;
+    wakeWordHeard: Array<(event: WakeWordHeardEvent) => void>;
   } = {
     statusChange: [],
     commandStatus: [],
     connected: [],
+    wakeWordStatus: [],
+    wakeWordHeard: [],
   };
 
   public async start(): Promise<void> {
@@ -77,6 +81,15 @@ class SignalRService {
       this.listeners.commandStatus.forEach((cb) => cb({ commandId, status, output }));
     });
 
+    // Phase 6B: Wake-Word real-time status & heard events
+    this.connection.on('WakeWordStatusChanged', (status: WakeWordStatus) => {
+      this.listeners.wakeWordStatus.forEach((cb) => cb(status));
+    });
+
+    this.connection.on('WakeWordHeard', (phrase: string, timestamp: string) => {
+      this.listeners.wakeWordHeard.forEach((cb) => cb({ phrase, timestamp }));
+    });
+
     this.connection.onclose(() => {
       this.listeners.connected.forEach((cb) => cb(false));
     });
@@ -120,6 +133,20 @@ class SignalRService {
     this.listeners.connected.push(callback);
     return () => {
       this.listeners.connected = this.listeners.connected.filter((cb) => cb !== callback);
+    };
+  }
+
+  public onWakeWordStatus(callback: (status: WakeWordStatus) => void): () => void {
+    this.listeners.wakeWordStatus.push(callback);
+    return () => {
+      this.listeners.wakeWordStatus = this.listeners.wakeWordStatus.filter((cb) => cb !== callback);
+    };
+  }
+
+  public onWakeWordHeard(callback: (event: WakeWordHeardEvent) => void): () => void {
+    this.listeners.wakeWordHeard.push(callback);
+    return () => {
+      this.listeners.wakeWordHeard = this.listeners.wakeWordHeard.filter((cb) => cb !== callback);
     };
   }
 }

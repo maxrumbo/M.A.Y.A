@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sliders,
   Laptop,
@@ -17,9 +17,15 @@ import {
   Volume1,
   Play,
   Loader2,
+  Radio,
+  Square,
+  Ear,
+  BatteryCharging,
+  ShieldCheck,
 } from 'lucide-react';
 import { api } from '../api/client';
-import type { DeviceStatus } from '../types';
+import { signalRService } from '../services/signalr';
+import type { DeviceStatus, AgentSettings, WakeWordStatus } from '../types';
 
 interface LaptopControlViewProps {
   deviceStatus: DeviceStatus | null;
@@ -30,7 +36,176 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
   deviceStatus,
 }) => {
   const [executing, setExecuting] = useState<string | null>(null);
+  const [findMeActive, setFindMeActive] = useState<boolean>(false);
+  const [findMeFeedback, setFindMeFeedback] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
+  const [wakeSettings, setWakeSettings] = useState<AgentSettings>({
+    wakeWordEnabled: false,
+    batterySaverEnabled: true,
+    batteryThresholdPercent: 20,
+  });
+  const [wakeStatus, setWakeStatus] = useState<WakeWordStatus>({
+    state: 'Disabled',
+    engine: 'WindowsSpeech',
+    reason: 'Dimatikan oleh pengguna (opt-in).',
+    updatedAt: new Date().toISOString(),
+  });
+  const [savingWake, setSavingWake] = useState<boolean>(false);
+
+  const findMeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isOnline = deviceStatus?.isOnline ?? false;
+
+  useEffect(() => {
+    api
+      .getWakeWordState()
+      .then((res) => {
+        setWakeSettings(res.settings);
+        setWakeStatus(res.status);
+        setFindMeActive(res.isFindMeActive);
+      })
+      .catch(() => {});
+
+    const unsubWakeStatus = signalRService.onWakeWordStatus((status) => {
+      setWakeStatus((prev) => ({
+        ...prev,
+        ...status,
+        lastHeardPhrase: status.lastHeardPhrase ?? prev.lastHeardPhrase,
+        lastHeardAt: status.lastHeardAt ?? prev.lastHeardAt,
+      }));
+    });
+
+    const unsubWakeHeard = signalRService.onWakeWordHeard((ev) => {
+      setWakeStatus((prev) => ({
+        ...prev,
+        lastHeardPhrase: ev.phrase,
+        lastHeardAt: ev.timestamp,
+      }));
+    });
+
+    return () => {
+      unsubWakeStatus();
+      unsubWakeHeard();
+      if (findMeTimerRef.current) {
+        clearTimeout(findMeTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleFindMyLaptop = async () => {
+    if (!isOnline) {
+      setFindMeFeedback({ type: 'error', text: 'Laptop sedang offline.' });
+      return;
+    }
+
+    setExecuting('Find My Laptop');
+    setFindMeFeedback(null);
+    try {
+      const res = await api.findMyLaptop(10);
+      setFindMeActive(true);
+      setFindMeFeedback({
+        type: 'success',
+        text: res.output || 'Laptop sedang berbunyi selama 10 detik.',
+      });
+
+      if (findMeTimerRef.current) clearTimeout(findMeTimerRef.current);
+      findMeTimerRef.current = setTimeout(() => {
+        setFindMeActive(false);
+      }, 10500);
+    } catch (err: any) {
+      setFindMeFeedback({
+        type: 'error',
+        text: err.message || 'Gagal membunyikan laptop.',
+      });
+    } finally {
+      setExecuting(null);
+    }
+  };
+
+  const handleStopFindMe = async () => {
+    setExecuting('Stop Find-Me');
+    try {
+      const res = await api.stopFindMe();
+      setFindMeActive(false);
+      if (findMeTimerRef.current) {
+        clearTimeout(findMeTimerRef.current);
+        findMeTimerRef.current = null;
+      }
+      setFindMeFeedback({
+        type: 'info',
+        text: res.output || 'Alarm Find-Me dihentikan.',
+      });
+    } catch (err: any) {
+      setFindMeFeedback({
+        type: 'error',
+        text: err.message || 'Gagal menghentikan alarm.',
+      });
+    } finally {
+      setExecuting(null);
+    }
+  };
+
+  const handleUpdateWakeSettings = async (patch: Partial<AgentSettings>) => {
+    const next: AgentSettings = { ...wakeSettings, ...patch };
+    setWakeSettings(next);
+    setSavingWake(true);
+    try {
+      const res = await api.updateWakeWordSettings(next);
+      setWakeSettings(res.settings);
+      setWakeStatus(res.status);
+    } catch (err: any) {
+      setFindMeFeedback({
+        type: 'error',
+        text: `Gagal menyimpan pengaturan wake-word: ${err.message}`,
+      });
+    } finally {
+      setSavingWake(false);
+    }
+  };
+
+  const getWakeStatusBadge = () => {
+    switch (wakeStatus.state) {
+      case 'Active':
+        return {
+          label: 'Aktif',
+          cls: 'bg-emerald-950/80 text-emerald-400 border-emerald-800/80',
+          dot: 'bg-emerald-400 animate-pulse',
+        };
+      case 'PausedBattery':
+        return {
+          label: 'Dijeda (Baterai)',
+          cls: 'bg-amber-950/80 text-amber-300 border-amber-800/80',
+          dot: 'bg-amber-400',
+        };
+      case 'Unsupported':
+        return {
+          label: 'Tidak Didukung',
+          cls: 'bg-red-950/80 text-red-400 border-red-800/80',
+          dot: 'bg-red-400',
+        };
+      default:
+        return {
+          label: 'Nonaktif',
+          cls: 'bg-zinc-900 text-zinc-400 border-zinc-800',
+          dot: 'bg-zinc-500',
+        };
+    }
+  };
+
+  const formatShortTime = (iso?: string | null) => {
+    if (!iso) return '';
+    try {
+      return new Date(iso).toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '';
+    }
+  };
+
+  const wakeBadge = getWakeStatusBadge();
 
   const triggerApp = async (appName: string, label: string) => {
     if (!isOnline) {
@@ -108,6 +283,154 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
 
       {/* Main Grid */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-5xl mx-auto w-full">
+        {/* Phase 6B: Find-Me & On-Device Wake-Word */}
+        <div>
+          <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
+            Mode &ldquo;Find-Me&rdquo; &amp; Wake-Word Listener
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Card 1: Find My Laptop */}
+            <div className="p-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 flex flex-col justify-between space-y-4">
+              <div className="flex items-start justify-between space-x-3">
+                <div className="flex items-start space-x-3">
+                  <div className="p-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-indigo-400 shrink-0">
+                    <Radio className={`h-4 w-4 ${findMeActive ? 'animate-ping' : ''}`} />
+                  </div>
+                  <div>
+                    <h4 className="font-medium text-sm text-zinc-100">Find My Laptop</h4>
+                    <p className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
+                      Bunyikan ping 3 nada &amp; suara &ldquo;Aku di sini, Max!&rdquo; selama 10 detik.
+                      Otomatis unmute sementara lalu mengembalikan volume semula.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {findMeFeedback && (
+                <div
+                  className={`px-3 py-2 rounded-xl border text-[11px] ${
+                    findMeFeedback.type === 'success'
+                      ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
+                      : findMeFeedback.type === 'error'
+                      ? 'bg-red-950/40 border-red-800/60 text-red-300'
+                      : 'bg-zinc-950 border-zinc-800 text-zinc-300'
+                  }`}
+                >
+                  {findMeFeedback.text}
+                </div>
+              )}
+
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={handleFindMyLaptop}
+                  disabled={!isOnline || !!executing}
+                  title={!isOnline ? 'Laptop sedang offline' : 'Bunyikan alarm Find-Me di laptop'}
+                  className="flex-1 flex items-center justify-center space-x-2 px-3.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                >
+                  <Radio className="h-3.5 w-3.5" />
+                  <span>{findMeActive ? 'Sedang Berbunyi...' : 'Find My Laptop (Ping)'}</span>
+                </button>
+
+                {findMeActive && (
+                  <button
+                    onClick={handleStopFindMe}
+                    disabled={!isOnline || !!executing}
+                    title="Hentikan alarm Find-Me sekarang"
+                    className="flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-red-600/80 hover:bg-red-500 text-white text-xs font-medium transition-colors disabled:opacity-40"
+                  >
+                    <Square className="h-3.5 w-3.5 fill-white" />
+                    <span>Stop</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Card 2: Wake-Word Listener & Battery Saver */}
+            <div className="p-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 flex flex-col justify-between space-y-3.5">
+              <div className="flex items-start justify-between space-x-2">
+                <div className="flex items-center space-x-2.5">
+                  <div className="p-2 rounded-xl bg-zinc-950 border border-zinc-800 text-indigo-400">
+                    <Ear className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-medium text-sm text-zinc-100">Wake-Word Listener</h4>
+                    <span className="text-[10px] font-mono text-zinc-500">
+                      {wakeStatus.engine || 'WindowsSpeech'}
+                    </span>
+                  </div>
+                </div>
+
+                <span
+                  className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full border text-[10px] font-mono shrink-0 ${wakeBadge.cls}`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${wakeBadge.dot}`} />
+                  <span>{wakeBadge.label}</span>
+                </span>
+              </div>
+
+              {/* Toggles */}
+              <div className="space-y-2.5">
+                <label className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800/80 cursor-pointer">
+                  <div className="pr-3">
+                    <div className="text-xs font-medium text-zinc-200">
+                      Aktifkan Wake-Word (&ldquo;Hey Maya&rdquo;)
+                    </div>
+                    <div className="text-[10px] text-zinc-500 flex items-center space-x-1 mt-0.5">
+                      <ShieldCheck className="h-3 w-3 text-zinc-500 shrink-0" />
+                      <span>Diproses 100% lokal di Windows, tidak direkam ke server.</span>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={wakeSettings.wakeWordEnabled}
+                    disabled={savingWake}
+                    onChange={(e) =>
+                      handleUpdateWakeSettings({ wakeWordEnabled: e.target.checked })
+                    }
+                    className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-indigo-600 focus:ring-0 cursor-pointer shrink-0"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800/80 cursor-pointer">
+                  <div className="pr-3">
+                    <div className="text-xs font-medium text-zinc-200 flex items-center space-x-1.5">
+                      <BatteryCharging className="h-3.5 w-3.5 text-emerald-400" />
+                      <span>Mode Hemat Baterai</span>
+                    </div>
+                    <div className="text-[10px] text-zinc-500 mt-0.5">
+                      Auto-pause bila baterai &lt; {wakeSettings.batteryThresholdPercent}% &amp; tidak di-charge.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={wakeSettings.batterySaverEnabled}
+                    disabled={savingWake}
+                    onChange={(e) =>
+                      handleUpdateWakeSettings({ batterySaverEnabled: e.target.checked })
+                    }
+                    className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-indigo-600 focus:ring-0 cursor-pointer shrink-0"
+                  />
+                </label>
+              </div>
+
+              {/* Status Reason & Last Heard */}
+              <div className="text-[11px] text-zinc-400 flex flex-col space-y-1 pt-1 border-t border-zinc-800/70">
+                {wakeStatus.reason && wakeStatus.state !== 'Active' && (
+                  <p className="text-zinc-500 truncate" title={wakeStatus.reason}>
+                    {wakeStatus.reason}
+                  </p>
+                )}
+                {wakeStatus.lastHeardPhrase && (
+                  <p className="text-zinc-300 font-mono text-[10px]">
+                    Terakhir terdengar: &ldquo;{wakeStatus.lastHeardPhrase}&rdquo;
+                    {wakeStatus.lastHeardAt ? ` • ${formatShortTime(wakeStatus.lastHeardAt)}` : ''}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Section 1: Allowlist Workspace Apps */}
         <div>
           <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">

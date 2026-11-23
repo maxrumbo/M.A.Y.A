@@ -5,6 +5,8 @@ import type {
   VaultRevealResponse,
   MemoryEntry,
   MuteStatus,
+  AgentSettings,
+  WakeWordStateResponse,
 } from '../types';
 
 export const API_BASE_URL =
@@ -132,6 +134,33 @@ export const api = {
   cancelCommand: (commandId: string) =>
     apiRequest<void>(`/api/agent/commands/${commandId}/cancel`, {
       method: 'POST',
+    }),
+
+  // ─── Phase 6B: Find-Me & Wake-Word ───
+  findMyLaptop: (durationSeconds = 10, message?: string) =>
+    apiRequest<{ commandId: string; isSuccess: boolean; output: string; completedAt: string }>(
+      '/api/agent/find-me',
+      {
+        method: 'POST',
+        body: JSON.stringify({ durationSeconds, message }),
+      }
+    ),
+
+  stopFindMe: () =>
+    apiRequest<{ commandId: string; isSuccess: boolean; output: string; completedAt: string }>(
+      '/api/agent/find-me/stop',
+      {
+        method: 'POST',
+      }
+    ),
+
+  getWakeWordState: () =>
+    apiRequest<WakeWordStateResponse>('/api/agent/wake-word'),
+
+  updateWakeWordSettings: (settings: AgentSettings) =>
+    apiRequest<WakeWordStateResponse>('/api/agent/wake-word', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
     }),
 
   // ─── Vault ───

@@ -34,6 +34,22 @@ export const App: React.FC = () => {
       .then(setDeviceStatus)
       .catch(() => {});
 
+    // Periodic polling every 5s to guarantee fresh telemetry & online status
+    const pollInterval = setInterval(() => {
+      api
+        .getDeviceStatus()
+        .then((fresh) => {
+          setDeviceStatus((prev) => ({
+            ...prev,
+            ...fresh,
+            cpuUsagePercent: fresh.cpuUsagePercent ?? prev?.cpuUsagePercent ?? null,
+            ramUsagePercent: fresh.ramUsagePercent ?? prev?.ramUsagePercent ?? null,
+            batteryPercent: fresh.batteryPercent ?? prev?.batteryPercent ?? null,
+          }));
+        })
+        .catch(() => {});
+    }, 5000);
+
     // Start SignalR
     signalRService.start();
 
@@ -50,6 +66,7 @@ export const App: React.FC = () => {
     const unsubConn = signalRService.onConnectionChange(setIsSignalRConnected);
 
     return () => {
+      clearInterval(pollInterval);
       unsubStatus();
       unsubConn();
       signalRService.stop();

@@ -19,6 +19,7 @@ builder.Services.AddSingleton<ILocalCommand, GitWorkflowCommand>();
 builder.Services.AddSingleton<ILocalCommand, PowerControlCommand>();
 builder.Services.AddSingleton<ILocalCommand, MediaControlCommand>();
 builder.Services.AddSingleton<ILocalCommand, GetSystemStatsCommand>();
+builder.Services.AddSingleton<ILocalCommand, WriteNotepadCommand>();
 
 // ─── Background Worker Service ────────────────────────────────────────────────
 builder.Services.AddHostedService<Worker>();

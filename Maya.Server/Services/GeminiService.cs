@@ -396,6 +396,21 @@ public class GeminiService : IGeminiService
             ),
 
             new GeminiFunctionDeclaration(
+                Name:        "write_notepad",
+                Description: "Tulis dan simpan catatan teks baru ke file di laptop Maxwell (folder Documents/MayaNotes/) lalu otomatis buka file tersebut di Notepad. Gunakan tool ini saat Maxwell meminta membuat, menulis, atau mencatat teks/catatan ke notepad.",
+                Parameters: new
+                {
+                    type = "OBJECT",
+                    properties = new
+                    {
+                        title = new { type = "STRING", description = "Judul catatan atau nama file (misal: 'catatan_meeting', 'ide_proyek', 'todo')" },
+                        content = new { type = "STRING", description = "Isi teks lengkap yang ingin ditulis ke dalam catatan Notepad." }
+                    },
+                    required = new[] { "title", "content" }
+                }
+            ),
+
+            new GeminiFunctionDeclaration(
                 Name:        "open_laptop_url",
                 Description: "Buka tautan website di browser default laptop Maxwell. Wajib diawali http:// atau https://.",
                 Parameters: new
@@ -524,6 +539,7 @@ public class GeminiService : IGeminiService
             "request_vault_access" => HandleRequestVaultAccess(args),
             "get_laptop_stats"     => await HandleGetLaptopStatsAsync(conversationId),
             "open_laptop_app"      => await HandleOpenLaptopAppAsync(args, conversationId),
+            "write_notepad"        => await HandleWriteNotepadAsync(args, conversationId),
             "open_laptop_url"      => await HandleOpenLaptopUrlAsync(args, conversationId),
             "git_workflow"         => await HandleGitWorkflowAsync(args, conversationId),
             "power_control"        => await HandlePowerControlAsync(args, conversationId),
@@ -647,6 +663,26 @@ public class GeminiService : IGeminiService
         );
 
         return (result?.Output ?? $"Aplikasi {appName} berhasil dibuka di laptop.", null);
+    }
+
+    private async Task<(string ToolResult, PendingActionDto? PendingAction)> HandleWriteNotepadAsync(
+        JsonElement args, Guid conversationId)
+    {
+        var title   = args.TryGetProperty("title", out var tEl)   ? tEl.GetString()?.Trim() ?? "Catatan" : "Catatan";
+        var content = args.TryGetProperty("content", out var cEl) ? cEl.GetString() ?? "" : "";
+
+        if (!await _dispatcher.IsAgentOnlineAsync())
+            return ("Laptop agent is currently offline. Laptop Maxwell sedang tidak aktif/terhubung.", null);
+
+        var (_, _, result) = await _dispatcher.DispatchCommandAsync(
+            "write_notepad",
+            new { title, content },
+            conversationId,
+            requiresConfirmation: false,
+            $"Tulis catatan '{title}' ke Notepad"
+        );
+
+        return (result?.Output ?? $"Catatan '{title}' berhasil ditulis dan dibuka di Notepad laptop Maxwell.", null);
     }
 
     private async Task<(string ToolResult, PendingActionDto? PendingAction)> HandleOpenLaptopUrlAsync(

@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   Clock,
   Sparkles,
+  PlusCircle,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -26,6 +27,7 @@ interface ChatWorkspaceProps {
 
 export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -78,6 +80,12 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
     }
   };
 
+  const handleNewChat = () => {
+    if (loading) return;
+    setConversationId(null);
+    setMessages([]);
+  };
+
   // Send Message
   const handleSend = async () => {
     if (!input.trim() || loading) return;
@@ -90,7 +98,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
 
     const userMsg: ChatMessage = {
       id: `u-${Date.now()}`,
-      conversationId: 'default',
+      conversationId: conversationId || 'default',
       role: 'user',
       content: userText,
       createdAt: new Date().toISOString(),
@@ -103,11 +111,15 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
     abortControllerRef.current = abortController;
 
     try {
-      const res = await api.sendMessage(userText, undefined, abortController.signal);
+      const res = await api.sendMessage(userText, conversationId || undefined, abortController.signal);
+
+      if (res.conversationId) {
+        setConversationId(res.conversationId);
+      }
 
       const botMsg: ChatMessage = {
         id: `m-${Date.now()}`,
-        conversationId: res.conversationId || 'default',
+        conversationId: res.conversationId || conversationId || 'default',
         role: 'model',
         content: res.reply,
         createdAt: new Date().toISOString(),
@@ -126,7 +138,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
           ...prev,
           {
             id: `err-${Date.now()}`,
-            conversationId: 'default',
+            conversationId: conversationId || 'default',
             role: 'model',
             content: '*Generasi pesan dihentikan.*',
             createdAt: new Date().toISOString(),
@@ -137,7 +149,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
           ...prev,
           {
             id: `err-${Date.now()}`,
-            conversationId: 'default',
+            conversationId: conversationId || 'default',
             role: 'model',
             content: `*Error:* ${err.message || 'Gagal menghubungi server.'}`,
             createdAt: new Date().toISOString(),
@@ -274,28 +286,41 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
           </div>
         </div>
 
-        {/* Proactive Snooze Controls */}
-        <div className="relative">
+        {/* Header Action Controls */}
+        <div className="flex items-center space-x-2">
+          {/* Sesi Baru Button */}
           <button
-            onClick={() => setShowMuteMenu((prev) => !prev)}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs transition-colors ${
-              muteStatus?.isMuted
-                ? 'bg-amber-950/40 border-amber-800/60 text-amber-300'
-                : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
-            }`}
+            onClick={handleNewChat}
+            disabled={loading}
+            title="Mulai Sesi Percakapan Baru"
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 text-xs transition-colors disabled:opacity-50"
           >
-            {muteStatus?.isMuted ? (
-              <>
-                <BellOff className="h-3.5 w-3.5" />
-                <span>Muted ({muteStatus.remainingMinutes}m)</span>
-              </>
-            ) : (
-              <>
-                <Bell className="h-3.5 w-3.5" />
-                <span>Proaktif: Aktif</span>
-              </>
-            )}
+            <PlusCircle className="h-3.5 w-3.5" />
+            <span>Sesi Baru</span>
           </button>
+
+          {/* Proactive Snooze Controls */}
+          <div className="relative">
+            <button
+              onClick={() => setShowMuteMenu((prev) => !prev)}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs transition-colors ${
+                muteStatus?.isMuted
+                  ? 'bg-amber-950/40 border-amber-800/60 text-amber-300'
+                  : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              {muteStatus?.isMuted ? (
+                <>
+                  <BellOff className="h-3.5 w-3.5" />
+                  <span>Muted ({muteStatus.remainingMinutes}m)</span>
+                </>
+              ) : (
+                <>
+                  <Bell className="h-3.5 w-3.5" />
+                  <span>Proaktif: Aktif</span>
+                </>
+              )}
+            </button>
 
           {showMuteMenu && (
             <div className="absolute right-0 mt-2 w-48 rounded-2xl border border-zinc-800 bg-zinc-900/95 backdrop-blur-xl p-1.5 shadow-2xl z-20 text-xs">
@@ -331,7 +356,8 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
             </div>
           )}
         </div>
-      </header>
+      </div>
+    </header>
 
       {/* Messages Scroll Area */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5">

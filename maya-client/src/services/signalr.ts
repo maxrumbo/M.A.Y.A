@@ -29,32 +29,48 @@ class SignalRService {
       .configureLogging(signalR.LogLevel.Warning)
       .build();
 
-    this.connection.on('AgentStatusChanged', (deviceId: string, isOnline: boolean) => {
-      this.listeners.statusChange.forEach((cb) =>
-        cb({
-          deviceId,
+    this.connection.on('AgentStatusChanged', (statusOrId: any, isOnlineParam?: boolean) => {
+      let status: DeviceStatus;
+      if (typeof statusOrId === 'object' && statusOrId !== null) {
+        status = {
+          deviceId: statusOrId.deviceId || 'maxwell-laptop',
+          deviceType: statusOrId.deviceType || 'laptop',
+          isOnline: !!statusOrId.isOnline,
+          cpuUsagePercent: statusOrId.cpuUsagePercent ?? null,
+          ramUsagePercent: statusOrId.ramUsagePercent ?? null,
+          batteryPercent: statusOrId.batteryPercent ?? null,
+          lastSeenAt: statusOrId.lastSeenAt || new Date().toISOString(),
+        };
+      } else {
+        status = {
+          deviceId: typeof statusOrId === 'string' ? statusOrId : 'maxwell-laptop',
           deviceType: 'laptop',
-          isOnline,
+          isOnline: !!isOnlineParam,
           cpuUsagePercent: null,
           ramUsagePercent: null,
           batteryPercent: null,
           lastSeenAt: new Date().toISOString(),
-        })
-      );
+        };
+      }
+      this.listeners.statusChange.forEach((cb) => cb(status));
     });
 
     this.connection.on('HardwareTelemetryUpdated', (stats: any) => {
       this.listeners.statusChange.forEach((cb) =>
         cb({
-          deviceId: stats.deviceId || 'maxwell-laptop',
+          deviceId: stats?.deviceId || 'maxwell-laptop',
           deviceType: 'laptop',
           isOnline: true,
-          cpuUsagePercent: stats.cpuUsagePercent ?? null,
-          ramUsagePercent: stats.ramUsagePercent ?? null,
-          batteryPercent: stats.batteryPercent ?? null,
-          lastSeenAt: stats.lastSeenAt || new Date().toISOString(),
+          cpuUsagePercent: stats?.cpuUsagePercent ?? null,
+          ramUsagePercent: stats?.ramUsagePercent ?? null,
+          batteryPercent: stats?.batteryPercent ?? null,
+          lastSeenAt: stats?.lastSeenAt || new Date().toISOString(),
         })
       );
+    });
+
+    this.connection.on('CommandStatusUpdated', (commandId: string, status: string, output?: string) => {
+      this.listeners.commandStatus.forEach((cb) => cb({ commandId, status, output }));
     });
 
     this.connection.on('CommandStatusChanged', (commandId: string, status: string, output?: string) => {

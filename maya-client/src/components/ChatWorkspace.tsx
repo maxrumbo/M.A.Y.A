@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Send,
   Square,
@@ -14,12 +14,19 @@ import {
   Clock,
   Sparkles,
   PlusCircle,
+  Mic,
+  Volume2,
+  VolumeX,
+  Sliders,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api } from '../api/client';
 import type { ChatMessage, DeviceStatus, PendingAction, MuteStatus } from '../types';
 import { StepUpModal } from './StepUpModal';
+import { useVoiceAssistant } from '../services/voice/useVoiceAssistant';
+import { VoiceWaveIndicator } from './voice/VoiceWaveIndicator';
+import { VoiceSettingsModal } from './voice/VoiceSettingsModal';
 
 interface ChatWorkspaceProps {
   deviceStatus: DeviceStatus | null;
@@ -33,6 +40,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [muteStatus, setMuteStatus] = useState<MuteStatus | null>(null);
   const [showMuteMenu, setShowMuteMenu] = useState(false);
+  const [showVoiceSettings, setShowVoiceSettings] = useState(false);
 
   // Step-Up Modal State
   const [stepUpTarget, setStepUpTarget] = useState<{
@@ -44,11 +52,117 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const conversationIdRef = useRef<string | null>(conversationId);
+
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+  }, [conversationId]);
 
   // Load initial mute status
   useEffect(() => {
     api.getMuteStatus().then(setMuteStatus).catch(() => {});
   }, []);
+
+  const handleNewChat = () => {
+    if (loading) return;
+    voiceRef.current?.stopSpeaking();
+    setConversationId(null);
+    setMessages([]);
+  };
+
+  // Send Message (Textarea atau Voice Override)
+  const handleSend = useCallback(async (overrideText?: string) => {
+    const messageToSend = (overrideText ?? input).trim();
+    if (!messageToSend || loading) return;
+
+    if (!overrideText) {
+      setInput('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+    }
+
+    const userMsg: ChatMessage = {
+      id: `u-${Date.now()}`,
+      conversationId: conversationIdRef.current || 'default',
+      role: 'user',
+      content: messageToSend,
+      createdAt: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    setLoading(true);
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    try {
+      const res = await api.sendMessage(messageToSend, conversationIdRef.current || undefined, abortController.signal);
+
+      if (res.conversationId) {
+        setConversationId(res.conversationId);
+      }
+
+      const botMsg: ChatMessage = {
+        id: `m-${Date.now()}`,
+        conversationId: res.conversationId || conversationIdRef.current || 'default',
+        role: 'model',
+        content: res.reply,
+        createdAt: new Date().toISOString(),
+        pendingActions: res.pendingActions
+          ? res.pendingActions.map((pa) => ({
+              ...pa,
+              status: 'Waiting',
+            }))
+          : null,
+      };
+
+      setMessages((prev) => [...prev, botMsg]);
+
+      // Phase 6A: M.A.Y.A. membacakan balasan teks via TTS
+      voiceRef.current?.speakResponse(res.reply);
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `err-${Date.now()}`,
+            conversationId: conversationIdRef.current || 'default',
+            role: 'model',
+            content: '*Generasi pesan dihentikan.*',
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `err-${Date.now()}`,
+            conversationId: conversationIdRef.current || 'default',
+            role: 'model',
+            content: `*Error:* ${err.message || 'Gagal menghubungi server.'}`,
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+      }
+    } finally {
+      setLoading(false);
+      abortControllerRef.current = null;
+    }
+  }, [input, loading]);
+
+  // Voice Assistant Hook
+  const voice = useVoiceAssistant({
+    onSendMessage: async (text: string) => {
+      await handleSend(text);
+    },
+    isGenerating: loading,
+  });
+
+  const voiceRef = useRef(voice);
+  useEffect(() => {
+    voiceRef.current = voice;
+  }, [voice]);
 
   // Scroll to bottom
   const scrollToBottom = () => {
@@ -80,93 +194,12 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
     }
   };
 
-  const handleNewChat = () => {
-    if (loading) return;
-    setConversationId(null);
-    setMessages([]);
-  };
-
-  // Send Message
-  const handleSend = async () => {
-    if (!input.trim() || loading) return;
-
-    const userText = input.trim();
-    setInput('');
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
-
-    const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
-      conversationId: conversationId || 'default',
-      role: 'user',
-      content: userText,
-      createdAt: new Date().toISOString(),
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
-    setLoading(true);
-
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
-    try {
-      const res = await api.sendMessage(userText, conversationId || undefined, abortController.signal);
-
-      if (res.conversationId) {
-        setConversationId(res.conversationId);
-      }
-
-      const botMsg: ChatMessage = {
-        id: `m-${Date.now()}`,
-        conversationId: res.conversationId || conversationId || 'default',
-        role: 'model',
-        content: res.reply,
-        createdAt: new Date().toISOString(),
-        pendingActions: res.pendingActions
-          ? res.pendingActions.map((pa) => ({
-              ...pa,
-              status: 'Waiting',
-            }))
-          : null,
-      };
-
-      setMessages((prev) => [...prev, botMsg]);
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `err-${Date.now()}`,
-            conversationId: conversationId || 'default',
-            role: 'model',
-            content: '*Generasi pesan dihentikan.*',
-            createdAt: new Date().toISOString(),
-          },
-        ]);
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `err-${Date.now()}`,
-            conversationId: conversationId || 'default',
-            role: 'model',
-            content: `*Error:* ${err.message || 'Gagal menghubungi server.'}`,
-            createdAt: new Date().toISOString(),
-          },
-        ]);
-      }
-    } finally {
-      setLoading(false);
-      abortControllerRef.current = null;
-    }
-  };
-
   // Stop Generation
   const handleStop = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
+    voice.stopSpeaking();
   };
 
   // Copy Message
@@ -356,6 +389,32 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
             </div>
           )}
         </div>
+
+        {/* TTS Toggle Button */}
+        <button
+          onClick={voice.toggleTts}
+          title={voice.settings.ttsEnabled ? 'Mute Suara TTS M.A.Y.A.' : 'Aktifkan Suara TTS M.A.Y.A.'}
+          className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-xl border text-xs transition-colors ${
+            voice.settings.ttsEnabled
+              ? 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700'
+              : 'bg-zinc-950 border-zinc-800/80 text-zinc-500 hover:text-zinc-400'
+          }`}
+        >
+          {voice.settings.ttsEnabled ? (
+            <Volume2 className="h-3.5 w-3.5 text-indigo-400" />
+          ) : (
+            <VolumeX className="h-3.5 w-3.5 text-zinc-500" />
+          )}
+        </button>
+
+        {/* Voice Settings Button */}
+        <button
+          onClick={() => setShowVoiceSettings(true)}
+          title="Pengaturan Suara M.A.Y.A. (Phase 6A)"
+          className="flex items-center space-x-1 px-2 py-1.5 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 text-xs transition-colors"
+        >
+          <Sliders className="h-3.5 w-3.5 text-zinc-400" />
+        </button>
       </div>
     </header>
 
@@ -495,6 +554,15 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
 
       {/* Input Area */}
       <footer className="p-4 border-t border-zinc-800/80 bg-zinc-950 shrink-0">
+        {/* Phase 6A: Voice Waveform / Status Indicator */}
+        <VoiceWaveIndicator
+          state={voice.voiceState}
+          transcript={voice.transcript}
+          errorMessage={voice.errorMessage}
+          onStop={voice.stopSpeaking}
+          voiceMode={voice.settings.voiceMode}
+        />
+
         <div className="max-w-3xl mx-auto flex items-end space-x-2 rounded-2xl border border-zinc-800 bg-zinc-900/90 p-2 focus-within:border-indigo-500/80 focus-within:ring-1 focus-within:ring-indigo-500/50 transition-all">
           <textarea
             ref={textareaRef}
@@ -515,6 +583,33 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
             className="flex-1 max-h-32 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 resize-none outline-none px-2 py-1.5 leading-relaxed"
           />
 
+          {/* Phase 6A: Voice Input (Mic Button) */}
+          {voice.isSttSupported && (
+            <button
+              type="button"
+              onClick={() => {
+                if (voice.isListening) {
+                  voice.stopListening();
+                } else {
+                  voice.startListening();
+                }
+              }}
+              disabled={loading}
+              title={
+                voice.isListening
+                  ? 'Klik untuk Selesai & Kirim'
+                  : `Mulai Bicara (${voice.settings.voiceMode === 'hands_free' ? 'Hands-Free' : 'Push-to-Talk'})`
+              }
+              className={`p-2 rounded-xl transition-all ${
+                voice.isListening
+                  ? 'bg-emerald-600 text-white animate-pulse ring-2 ring-emerald-400/50 shadow-lg shadow-emerald-500/20'
+                  : 'bg-zinc-800 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700'
+              } disabled:opacity-40 disabled:pointer-events-none`}
+            >
+              <Mic className="h-4 w-4" />
+            </button>
+          )}
+
           {loading ? (
             <button
               onClick={handleStop}
@@ -525,7 +620,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
             </button>
           ) : (
             <button
-              onClick={handleSend}
+              onClick={() => handleSend()}
               disabled={!input.trim()}
               className="p-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 transition-colors disabled:opacity-30 disabled:pointer-events-none"
               title="Kirim (Enter)"
@@ -535,6 +630,15 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
           )}
         </div>
       </footer>
+
+      {/* Voice Settings Modal (Phase 6A) */}
+      {showVoiceSettings && (
+        <VoiceSettingsModal
+          settings={voice.settings}
+          onUpdate={voice.updateSettings}
+          onClose={() => setShowVoiceSettings(false)}
+        />
+      )}
 
       {/* Step-Up Confirmation Modal */}
       {stepUpTarget && (

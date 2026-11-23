@@ -57,7 +57,7 @@ public class GeminiService : IGeminiService
         _googleService     = googleService;
         _db                = db;
         _logger            = logger;
-        _geminiModel       = config["Gemini:Model"] ?? "gemini-3-flash-preview";
+        _geminiModel       = config["Gemini:Model"] ?? "gemini-3.1-flash-lite";
     }
 
     // ─── Main Entry Point ─────────────────────────────────────────────────────
@@ -180,8 +180,8 @@ public class GeminiService : IGeminiService
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "Gagal menghubungi Gemini API.");
-            return ("Maaf Max, koneksi ke otak AI-ku lagi gangguan nih. Coba lagi dalam beberapa saat ya.", null);
+            _logger.LogError(ex, "Gagal menghubungi Gemini API: {Message}", ex.Message);
+            return ($"Maaf Max, koneksi ke otak AI-ku lagi gangguan nih ({ex.Message}). Coba lagi dalam beberapa saat ya.", null);
         }
         catch (Exception ex)
         {

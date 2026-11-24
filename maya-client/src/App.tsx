@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { authStorage, api } from './api/client';
 import { signalRService } from './services/signalr';
+import { registerDeviceForPush } from './services/pushNotifications';
 import {
   isNativeMobile,
   startNativeFindMe,
@@ -72,11 +73,19 @@ export const App: React.FC = () => {
     // Start SignalR
     void signalRService.start();
 
+    // Phase 8: Daftarkan HP ke FCM (APK saja; no-op di web / bila Firebase belum dipasang)
+    if (isNativeMobile()) {
+      void registerDeviceForPush(false).catch(() => {});
+    }
+
     // Phase 7B: Auto-reconnect SignalR segera saat layar HP menyala / app kembali aktif
     const handleResume = () => {
       if (document.visibilityState === 'visible') {
         void signalRService.ensureConnected();
         refreshStatus();
+        if (isNativeMobile()) {
+          void registerDeviceForPush(false).catch(() => {});
+        }
       }
     };
     const handleOnline = () => {

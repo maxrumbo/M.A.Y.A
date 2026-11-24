@@ -792,6 +792,29 @@ Mengunci seluruh sistem dengan autentikasi perangkat (Biometrik/PIN), menghidupk
 
 ---
 
+# 13.5 PHASE 8: CLOUD 24/7, FIREBASE FCM PUSH & GOOGLE OAUTH
+
+> Status: **Step 1–3 (code-readiness) selesai**. Step 4–5 (deploy cloud + pasang kredensial) dikerjakan setelah akun Render/Firebase/Google siap. Semua fitur punya **mode fallback** — server & app tetap normal bila kredensial belum diisi.
+
+* **Pilar 1 — Cloud Deployment (Render-compatible `Dockerfile`):**
+  * `Dockerfile` multi-stage: (1) `node:22-alpine` mem-build `maya-client` (`npm run build`), (2) `dotnet/sdk:11.0` mem-publish `Maya.Server`, (3) `dotnet/aspnet:11.0` (Debian: ICU + tzdata) menyalin hasil publish + `dist/` ke `wwwroot`. Port dinamis dari env `PORT` (fallback 10000). `render.yaml` (Blueprint) + `.dockerignore` (mengecualikan `.env`, `google-services.json`, `appsettings.Development.json`, `android/`).
+  * **Satu domain** untuk API + SignalR + Web: `Maya.Server` melayani static files dari `wwwroot` + SPA fallback (`MapFallbackToFile`, mengecualikan `/api`, `/hubs`, `/swagger`, `/health`). Klien web produksi memakai `window.location.origin` sebagai default server URL (`serverConfig.ts`); APK tetap memakai `VITE_API_BASE_URL` / Server URL dinamis.
+  * Hardening reverse proxy: `Maya:TrustForwardedHeaders=true` → `UseForwardedHeaders()` (IP klien asli untuk rate limiter, skema `https` untuk OAuth callback) dan `UseHttpsRedirection()` dilewati (TLS di-terminate proxy). `Maya:AllowedOrigins` (comma-separated) memperluas CORS bila web di-host terpisah. `Maya:DataDir` memindahkan `agent-settings.json` ke persistent disk. Timezone WIB kini resolve `SE Asia Standard Time` (Windows) **atau** `Asia/Jakarta` (Linux).
+  * `Maya.Agent` di laptop cukup mengganti `ServerHubUrl` ke `https://<domain>/hubs/maya` (user-secrets/env) → terhubung via WSS dari Wi-Fi mana pun; hanya server cloud yang mengakses Supabase (menghindari blokir port 5432 Wi-Fi kampus).
+* **Pilar 2 — Firebase Cloud Messaging (FCM):**
+  * `FcmNotificationService` (kini Singleton) mendukung `Firebase:ServiceAccountJsonBase64` (disarankan untuk env cloud) atau `Firebase:ServiceAccountJson`; `SendDataMessageAsync` (data-only, high priority, TTL 60 detik); pembersihan otomatis token `Unregistered`; token duplikat antar device-id dibersihkan.
+  * `MobileDeviceService`: Find My Phone mengirim **SignalR + FCM data message `type="find_me"`**; `find_me_stop` ikut dikirim saat dihentikan.
+  * Android: `MayaFirebaseMessagingService` + `MayaFindMeController` (mesin Find-Me mandiri, dipakai plugin & FCM) → alarm `STREAM_ALARM` + getar + TTS berbunyi **meski app tertutup total**, notifikasi dengan tombol **STOP** (`MayaFindMeStopReceiver`), channel `maya_general` & `maya_find_me`. Token diambil native via `FirebaseMessaging` (tanpa `@capacitor/push-notifications` agar tidak bentrok dengan service FCM sendiri) dan didaftarkan otomatis ke `POST /api/integrations/register-fcm` (`pushNotifications.ts`). Tanpa `google-services.json` → `available:false` (tidak error).
+  * `ProactiveSchedulerService`: check-in inaktivitas dibatasi **maks 1x per hari WIB** (sebelumnya berpotensi tiap 5 menit); Morning Briefing kini menyertakan ringkasan email belum dibaca; Google hanya dipanggil bila benar-benar `connected`.
+* **Pilar 3 — Google OAuth 2.0 (Gmail & Calendar):**
+  * **Security fix:** refresh token dienkripsi **AES-256-GCM** (`ISecretProtector`, `Maya:VaultMasterKey`, format `enc:v1:`) — token plaintext lama otomatis dimigrasi saat dibaca. `state` OAuth anti-CSRF (`OAuthStateStore`, single-use, 10 menit) + `access_type=offline` & `prompt=consent`.
+  * Endpoint baru: `GET /api/integrations/google/authorize-url` (JSON `{ authorizeUrl }`), `GET .../status` (`{ configured, connected }`), `POST .../disconnect`, `GET /api/integrations/fcm/status`, `POST /api/integrations/fcm/test`. Callback merespons halaman HTML.
+  * UI: kartu **Integrasi** di tab *Control* (`IntegrationsPanel.tsx`): Hubungkan/Putuskan Google, status FCM, Daftarkan HP, Tes Push Notification.
+* **Env var production:** `ConnectionStrings__DefaultConnection`, `Gemini__ApiKey`, `Maya__JwtSecret`, `Maya__AgentSecret`, `Maya__VaultMasterKey` (harus sama dengan lokal), opsional `Firebase__ServiceAccountJsonBase64`, `Google__ClientId`, `Google__ClientSecret`, `Google__CallbackUrl`, `Maya__AllowedOrigins`.
+* **Catatan:** OAuth consent screen mode *Testing* membuat refresh token Google kedaluwarsa tiap **7 hari** (hubungkan ulang), kecuali aplikasi dipublikasikan. Render plan *free* tidur ±15 menit tanpa trafik → notifikasi proaktif butuh plan always-on.
+
+---
+
 # 14. GLOBAL NON-FUNCTIONAL REQUIREMENTS & ERROR HANDLING
 
 1. **Latency Targets:**

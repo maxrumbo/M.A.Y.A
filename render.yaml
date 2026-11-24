@@ -1,0 +1,43 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Deploy: Render Dashboard → New → Blueprint → pilih repo GitHub ini.
+# Semua nilai rahasia diisi MANUAL di dashboard (sync: false) — TIDAK PERNAH di-commit.
+#
+# Catatan plan:
+#  - "free"    : gratis, tetapi service tidur setelah ±15 menit tanpa trafik masuk
+#                (Morning Briefing / check-in proaktif tidak berjalan saat tidur).
+#  - "starter" : always-on 24/7 (berbayar) → pilih ini untuk notifikasi proaktif yang andal.
+services:
+  - type: web
+    name: maya-server
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      # ── Wajib ──
+      - key: ConnectionStrings__DefaultConnection
+        sync: false
+      - key: Gemini__ApiKey
+        sync: false
+      - key: Maya__JwtSecret
+        sync: false
+      - key: Maya__AgentSecret
+        sync: false
+      - key: Maya__VaultMasterKey
+        sync: false # HARUS sama dengan master key lokal agar entri Vault lama tetap terbaca
+      # ── Opsional: Firebase FCM (Base64 dari file service account JSON) ──
+      - key: Firebase__ServiceAccountJsonBase64
+        sync: false
+      # ── Opsional: Google OAuth (Gmail & Calendar) ──
+      - key: Google__ClientId
+        sync: false
+      - key: Google__ClientSecret
+        sync: false
+      - key: Google__CallbackUrl
+        sync: false # https://<domain-render>/api/integrations/google/callback
+      # ── Opsional: origin web tambahan (comma-separated). Same-origin tidak perlu. ──
+      - key: Maya__AllowedOrigins
+        sync: false

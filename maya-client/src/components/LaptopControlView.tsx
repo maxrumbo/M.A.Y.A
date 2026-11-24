@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api/client';
 import { signalRService } from '../services/signalr';
+import { IntegrationsPanel } from './IntegrationsPanel';
 import {
   isNativeMobile,
   getKeepAliveStatus,
@@ -650,7 +651,10 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
               </div>
             </div>
 
-            {/* Card 4 (Phase 7B — Khusus APK Android): Mode Stand-By Layar Mati */}
+            {/* Card 5 (Phase 8): Integrasi Google OAuth & Push Notification FCM */}
+        <IntegrationsPanel />
+
+        {/* Card 4 (Phase 7B — Khusus APK Android): Mode Stand-By Layar Mati */}
             {nativeMobile && (
               <div className="md:col-span-2 p-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 flex flex-col justify-between space-y-3">
                 <div className="flex items-start justify-between space-x-3">

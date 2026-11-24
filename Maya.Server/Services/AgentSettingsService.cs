@@ -36,12 +36,17 @@ public class AgentSettingsService : IAgentSettingsService
     public AgentSettingsService(
         IHubContext<MayaHub, IMayaHubClient> hubContext,
         IWebHostEnvironment env,
+        IConfiguration config,
         ILogger<AgentSettingsService> logger)
     {
         _hubContext = hubContext;
         _logger = logger;
 
-        var dataDir = Path.Combine(env.ContentRootPath, "App_Data");
+        // Phase 8: Maya:DataDir (mis. persistent disk di cloud) menggantikan folder App_Data bawaan.
+        var configuredDir = config["Maya:DataDir"];
+        var dataDir = string.IsNullOrWhiteSpace(configuredDir)
+            ? Path.Combine(env.ContentRootPath, "App_Data")
+            : configuredDir;
         _settingsFilePath = Path.Combine(dataDir, "agent-settings.json");
 
         _settings = LoadSettingsFromDisk();

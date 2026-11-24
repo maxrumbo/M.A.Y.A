@@ -1,0 +1,39 @@
+# Build context Docker = root repo. Kecualikan semua yang tidak perlu / sensitif.
+
+# VCS & IDE
+.git
+.gitignore
+.vs
+.vscode
+.idea
+.agents
+
+# Build output .NET
+**/bin
+**/obj
+**/App_Data
+
+# Hanya Maya.Server + Maya.Shared yang masuk image (Agent berjalan di laptop)
+Maya.Agent
+
+# Rahasia / konfigurasi lokal — JANGAN PERNAH masuk image
+**/.env
+**/.env.*
+**/appsettings.Development.json
+**/secrets.json
+**/google-services.json
+**/*firebase-adminsdk*.json
+**/local.properties
+
+# maya-client: Android native & artefak lokal tidak dibutuhkan untuk build web
+maya-client/android
+maya-client/node_modules
+maya-client/dist
+
+# Lain-lain
+*.md
+*.ps1
+*.apk
+Dockerfile
+.dockerignore
+render.yaml

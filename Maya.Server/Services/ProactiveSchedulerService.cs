@@ -28,12 +28,21 @@ public class ProactiveSchedulerService : BackgroundService, IProactiveSchedulerS
 
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
 
-    // Timezone WIB (UTC+7)
-    private static readonly TimeZoneInfo WibZone =
-        TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time");
+    // Timezone WIB (UTC+7): "SE Asia Standard Time" di Windows, "Asia/Jakarta" di Linux/Docker (IANA)
+    private static readonly TimeZoneInfo WibZone = ResolveWibZone();
 
-    // Tracking morning briefing — hindari kirim 2x di hari yang sama
+    // Tracking — hindari kirim 2x di hari yang sama
     private DateOnly? _lastMorningBriefingDate;
+    private DateOnly? _lastCheckInDate;
+
+    private static TimeZoneInfo ResolveWibZone()
+    {
+        foreach (var id in new[] { "SE Asia Standard Time", "Asia/Jakarta" })
+        {
+            if (TimeZoneInfo.TryFindSystemTimeZoneById(id, out var tz)) return tz;
+        }
+        return TimeZoneInfo.CreateCustomTimeZone("WIB", TimeSpan.FromHours(7), "WIB", "WIB");
+    }
 
     public ProactiveSchedulerService(
         IServiceScopeFactory scopeFactory,
@@ -93,9 +102,10 @@ public class ProactiveSchedulerService : BackgroundService, IProactiveSchedulerS
 
         // ─── 2. Inactivity Check-in (08:00–22:00 WIB) ────────────────────────
         var hourWib = nowWib.Hour;
-        if (hourWib >= 8 && hourWib < 22)
+        if (hourWib >= 8 && hourWib < 22 && _lastCheckInDate != todayWib)
         {
-            await CheckInactivityAsync(db, fcm, geminiSvc, cancellationToken);
+            if (await CheckInactivityAsync(db, fcm, geminiSvc, cancellationToken))
+                _lastCheckInDate = todayWib; // maks 1x check-in per hari WIB (anti-spam)
         }
     }
 
@@ -109,8 +119,21 @@ public class ProactiveSchedulerService : BackgroundService, IProactiveSchedulerS
 
         var briefingParts = new List<string> { "Selamat pagi, Max! 🌅 Ini ringkasan harianmu:" };
 
-        // Coba ambil jadwal dari Google Calendar (fallback jika tidak dikonfigurasi)
+        // Coba ambil jadwal & email dari Google (fallback jika belum dikonfigurasi / belum terhubung)
+        var googleConnected = false;
         if (googleSvc.IsConfigured)
+        {
+            try
+            {
+                googleConnected = await googleSvc.IsConnectedAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("ProactiveScheduler: Gagal cek status koneksi Google. {Msg}", ex.Message);
+            }
+        }
+
+        if (googleConnected)
         {
             try
             {
@@ -130,10 +153,25 @@ public class ProactiveSchedulerService : BackgroundService, IProactiveSchedulerS
             {
                 _logger.LogWarning("ProactiveScheduler: Gagal ambil Google Calendar. {Msg}", ex.Message);
             }
+
+            try
+            {
+                var unread = await googleSvc.ListUnreadEmailsAsync(maxResults: 3);
+                if (unread.Count > 0)
+                {
+                    briefingParts.Add($"✉️ {unread.Count}+ email belum dibaca:");
+                    foreach (var mail in unread)
+                        briefingParts.Add($"  • {mail.Subject}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("ProactiveScheduler: Gagal ambil Gmail. {Msg}", ex.Message);
+            }
         }
         else
         {
-            _logger.LogInformation("ProactiveScheduler: Google Calendar belum dikonfigurasi — skip briefing jadwal.");
+            _logger.LogInformation("ProactiveScheduler: Google belum terhubung — skip ringkasan jadwal & email.");
         }
 
         var briefingText = string.Join("\n", briefingParts);
@@ -144,7 +182,7 @@ public class ProactiveSchedulerService : BackgroundService, IProactiveSchedulerS
         _logger.LogInformation("ProactiveScheduler: Morning Briefing selesai.");
     }
 
-    private async Task CheckInactivityAsync(
+    private async Task<bool> CheckInactivityAsync(
         MayaDbContext db,
         IFcmNotificationService fcm,
         IGeminiService geminiSvc,
@@ -156,11 +194,11 @@ public class ProactiveSchedulerService : BackgroundService, IProactiveSchedulerS
             .Select(m => (DateTimeOffset?)m.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (lastMessageAt is null) return; // Belum ada pesan sama sekali
+        if (lastMessageAt is null) return false; // Belum ada pesan sama sekali
 
         var hoursSinceLast = (DateTimeOffset.UtcNow - lastMessageAt.Value).TotalHours;
 
-        if (hoursSinceLast < 12) return; // Masih aktif, skip
+        if (hoursSinceLast < 12) return false; // Masih aktif, skip
 
         _logger.LogInformation(
             "ProactiveScheduler: Maxwell belum aktif selama {Hours:0.0} jam. Mengirim check-in proaktif.",
@@ -178,6 +216,9 @@ public class ProactiveSchedulerService : BackgroundService, IProactiveSchedulerS
         var greeting = greetings[Random.Shared.Next(greetings.Length)]
             .Replace("{hours}", $"{(int)hoursSinceLast}");
 
-        await fcm.SendNotificationAsync("M.A.Y.A. 💫", greeting);
+        // Hanya dianggap "terkirim" (mengunci cooldown harian) jika FCM benar-benar mengirim
+        // atau tidak ada device sama sekali yang bisa dikirimi; kegagalan sementara boleh dicoba lagi.
+        var delivered = await fcm.SendNotificationAsync("M.A.Y.A. 💫", greeting);
+        return delivered || !fcm.IsConfigured;
     }
 }

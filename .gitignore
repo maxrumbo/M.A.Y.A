@@ -488,3 +488,10 @@ $RECYCLE.BIN/
 
 # Phase 6B runtime agent settings JSON
 Maya.Server/App_Data/
+
+# Phase 8: kredensial Firebase / Google - JANGAN PERNAH commit
+google-services.json
+**/google-services.json
+*firebase-adminsdk*.json
+*-firebase-adminsdk-*.json
+client_secret*.json

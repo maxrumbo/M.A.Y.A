@@ -20,12 +20,23 @@ export interface KeepAliveStatus {
   ignoringBatteryOptimizations: boolean;
 }
 
+export interface FcmTokenResult {
+  available: boolean;
+  token?: string;
+  notificationsGranted: boolean;
+  reason?: string;
+}
+
 interface MayaNativePluginInterface {
   startFindMe(options: { durationSeconds: number; message?: string }): Promise<{
     started: boolean;
     durationSeconds: number;
   }>;
   stopFindMe(): Promise<{ stopped: boolean }>;
+
+  // Phase 8: Firebase Cloud Messaging
+  getFcmToken(): Promise<FcmTokenResult>;
+  requestPushPermission(): Promise<{ granted: boolean }>;
 
   // Phase 7B: Biometric + Android Keystore
   checkBiometricAvailability(): Promise<BiometricAvailability>;
@@ -102,6 +113,33 @@ export async function onNativeFindMeStopped(
   return () => {
     void handle.remove();
   };
+}
+
+// ─── Phase 8: Firebase Cloud Messaging Helpers ───────────────────────────────
+
+export async function requestPushPermission(): Promise<boolean> {
+  if (!isNativeMobile()) return false;
+  try {
+    const res = await MayaNative.requestPushPermission();
+    return !!res.granted;
+  } catch {
+    return false;
+  }
+}
+
+export async function getFcmToken(): Promise<FcmTokenResult> {
+  if (!isNativeMobile()) {
+    return { available: false, notificationsGranted: false, reason: 'web' };
+  }
+  try {
+    return await MayaNative.getFcmToken();
+  } catch (err: any) {
+    return {
+      available: false,
+      notificationsGranted: false,
+      reason: err?.message || 'error',
+    };
+  }
 }
 
 // ─── Phase 7B: Biometric Auth Helpers ────────────────────────────────────────

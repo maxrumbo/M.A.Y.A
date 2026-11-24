@@ -13,6 +13,17 @@ import { getApiBaseUrl } from '../services/serverConfig';
 
 export { getApiBaseUrl };
 
+export interface GoogleIntegrationStatus {
+  configured: boolean;
+  connected: boolean;
+  message: string;
+}
+
+export interface FcmIntegrationStatus {
+  configured: boolean;
+  registeredDevices: number;
+}
+
 const TOKEN_KEY = 'maya_access_token';
 
 export const authStorage = {
@@ -184,6 +195,35 @@ export const api = {
   stopFindMyPhone: () =>
     apiRequest<MobileStatus>('/api/mobile/find-me/stop', {
       method: 'POST',
+    }),
+
+  // ─── Phase 8: Integrations (Google OAuth & FCM) ───
+  getGoogleStatus: () =>
+    apiRequest<GoogleIntegrationStatus>('/api/integrations/google/status'),
+
+  getGoogleAuthorizeUrl: () =>
+    apiRequest<{ authorizeUrl: string; callbackUrl: string }>(
+      '/api/integrations/google/authorize-url'
+    ),
+
+  disconnectGoogle: () =>
+    apiRequest<void>('/api/integrations/google/disconnect', { method: 'POST' }),
+
+  getFcmStatus: () =>
+    apiRequest<FcmIntegrationStatus>('/api/integrations/fcm/status'),
+
+  sendFcmTest: () =>
+    apiRequest<{
+      sent: boolean;
+      configured: boolean;
+      registeredDevices: number;
+      message: string;
+    }>('/api/integrations/fcm/test', { method: 'POST' }),
+
+  registerFcmToken: (deviceId: string, fcmToken: string) =>
+    apiRequest<void>('/api/integrations/register-fcm', {
+      method: 'POST',
+      body: JSON.stringify({ deviceId, fcmToken }),
     }),
 
   // ─── Vault ───

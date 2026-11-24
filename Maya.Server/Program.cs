@@ -4,6 +4,7 @@ using Maya.Server.Middleware;
 using Maya.Server.Services;
 using Maya.Server.Services.Interfaces;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -105,11 +106,14 @@ builder.Services.AddScoped<IGeminiService, GeminiService>();
 // ─── Phase 4: Auth Service ────────────────────────────────────────────────────
 builder.Services.AddScoped<IAuthService, AuthService>();
 
-// ─── Phase 4: Google Integration (opsional — fallback jika creds tidak ada) ──
+// ─── Phase 4/8: Google Integration & Secret Protector (AES-256-GCM) ──────────
+builder.Services.AddSingleton<ISecretProtector, SecretProtector>();
+builder.Services.AddSingleton<OAuthStateStore>();
 builder.Services.AddScoped<IGoogleIntegrationService, GoogleIntegrationService>();
 
-// ─── Phase 4: FCM Notification (opsional — fallback ke log jika tidak ada) ───
-builder.Services.AddScoped<IFcmNotificationService, FcmNotificationService>();
+// ─── Phase 4/8: FCM Notification (opsional — fallback ke log jika tidak ada) ──
+// Singleton: dipakai juga oleh MobileDeviceService (singleton) untuk Find-Me via FCM push.
+builder.Services.AddSingleton<IFcmNotificationService, FcmNotificationService>();
 
 // ─── Phase 4 & 5: Notification Mute & Proactive Background Scheduler ──────────
 builder.Services.AddSingleton<INotificationMuteService, NotificationMuteService>();
@@ -181,7 +185,28 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// ─── CORS (Localhost, Capacitor & Wi-Fi LAN RFC1918) ─────────────────────────
+// ─── Phase 8: Cloud / Reverse Proxy (Render, Koyeb, Azure Container Apps) ────
+// Di balik proxy TLS, IP klien asli & skema https datang via X-Forwarded-*.
+// Aktifkan dengan Maya:TrustForwardedHeaders=true (diset otomatis di Dockerfile).
+var trustForwardedHeaders = builder.Configuration.GetValue<bool>("Maya:TrustForwardedHeaders");
+if (trustForwardedHeaders)
+{
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        // Platform PaaS memakai IP proxy internal yang dinamis → percaya semua hop (server tidak terekspos langsung).
+        options.KnownIPNetworks.Clear();
+        options.KnownProxies.Clear();
+    });
+}
+
+// Origin tambahan yang diizinkan CORS (comma-separated), mis. domain web terpisah. Same-origin tidak butuh ini.
+var extraAllowedOrigins = (builder.Configuration["Maya:AllowedOrigins"] ?? string.Empty)
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    .Select(o => o.TrimEnd('/'))
+    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+// ─── CORS (Localhost, Capacitor, Wi-Fi LAN RFC1918 & Maya:AllowedOrigins) ─────
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("MayaCorsPolicy", policy =>
@@ -190,6 +215,7 @@ builder.Services.AddCors(options =>
             .SetIsOriginAllowed(origin =>
             {
                 if (string.IsNullOrWhiteSpace(origin)) return false;
+                if (extraAllowedOrigins.Contains(origin.TrimEnd('/'))) return true;
                 if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
 
                 var host = uri.Host;
@@ -256,6 +282,12 @@ app.Lifetime.ApplicationStarted.Register(() =>
 });
 
 // ─── Middleware Pipeline ───────────────────────────────────────────────────────
+// Forwarded headers WAJIB pertama agar scheme/IP klien benar untuk semua middleware berikutnya.
+if (trustForwardedHeaders)
+{
+    app.UseForwardedHeaders();
+}
+
 // GlobalExceptionMiddleware WAJIB paling awal agar menangkap semua exception.
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
@@ -271,7 +303,22 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-app.UseHttpsRedirection();
+// Di balik proxy cloud, TLS sudah di-terminate proxy → jangan paksa redirect HTTPS di server.
+if (!trustForwardedHeaders)
+{
+    app.UseHttpsRedirection();
+}
+
+// Phase 8: Layani maya-client (hasil `npm run build`) sebagai static files dari wwwroot (1 domain: web + API + SignalR).
+// Hanya aktif jika wwwroot/index.html ada (di Docker image); saat dev lokal dilewati.
+var webRoot = app.Environment.WebRootPath;
+var hasWebClient = !string.IsNullOrEmpty(webRoot) && File.Exists(Path.Combine(webRoot, "index.html"));
+if (hasWebClient)
+{
+    app.UseDefaultFiles();
+    app.UseStaticFiles();
+}
+
 app.UseRouting();
 app.UseCors("MayaCorsPolicy");
 
@@ -284,6 +331,15 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<MayaHub>("/hubs/maya");
+
+// Phase 8: SPA fallback — rute React (mis. /vault) dikembalikan ke index.html,
+// kecuali namespace server (/api, /hubs, /swagger, /health) agar 404 API tetap jujur.
+if (hasWebClient)
+{
+    app.MapFallbackToFile(
+        "/{*path:regex(^(?!(api|hubs|swagger)(/|$)|health$).*$)}",
+        "index.html");
+}
 
 // ─── Health Check Endpoint ─────────────────────────────────────────────────────
 // GET /health → mengecek konektivitas database secara aktif. PUBLIK (tanpa auth).

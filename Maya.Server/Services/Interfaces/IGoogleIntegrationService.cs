@@ -11,13 +11,23 @@ public interface IGoogleIntegrationService
     /// <summary>
     /// Generate URL untuk memulai OAuth2 authorization flow.
     /// </summary>
-    string GetAuthorizationUrl(string state);
+    string GetAuthorizationUrl(string state, string? callbackUrl = null);
 
     /// <summary>
     /// Exchange authorization code untuk access + refresh token.
-    /// Simpan encrypted refresh token ke user_auth_configs.
+    /// Simpan refresh token terenkripsi AES-256-GCM ke user_auth_configs.
     /// </summary>
-    Task HandleCallbackAsync(string code, string state);
+    Task HandleCallbackAsync(string code, string state, string? callbackUrl = null);
+
+    /// <summary>
+    /// Phase 8: True jika refresh token Google sudah tersimpan (OAuth sudah pernah berhasil).
+    /// </summary>
+    Task<bool> IsConnectedAsync();
+
+    /// <summary>
+    /// Phase 8: Hapus refresh token Google yang tersimpan (putuskan koneksi).
+    /// </summary>
+    Task DisconnectAsync();
 
     // ─── Gmail Tools ─────────────────────────────────────────────────────────
 

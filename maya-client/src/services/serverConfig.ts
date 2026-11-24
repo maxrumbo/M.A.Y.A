@@ -1,12 +1,33 @@
+import { Capacitor } from '@capacitor/core';
+
 const STORAGE_KEY = 'maya_server_url';
 const HISTORY_KEY = 'maya_server_url_history';
 const MAX_HISTORY = 5;
 
-export const DEFAULT_API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL || 'http://localhost:5063'
-)
-  .trim()
-  .replace(/\/+$/, '');
+/**
+ * Phase 8: Default server URL.
+ *  1. VITE_API_BASE_URL (build APK / dev lokal) bila diisi.
+ *  2. Build web produksi yang dilayani langsung oleh Maya.Server (wwwroot) → origin yang sama
+ *     (tanpa CORS; API + SignalR + Web satu domain).
+ *  3. Fallback dev: http://localhost:5063.
+ */
+function resolveDefaultApiBaseUrl(): string {
+  const fromEnv = (import.meta.env.VITE_API_BASE_URL || '').trim();
+  if (fromEnv) return fromEnv.replace(/\/+$/, '');
+
+  if (
+    import.meta.env.PROD &&
+    !Capacitor.isNativePlatform() &&
+    typeof window !== 'undefined' &&
+    /^https?:$/.test(window.location.protocol)
+  ) {
+    return window.location.origin;
+  }
+
+  return 'http://localhost:5063';
+}
+
+export const DEFAULT_API_BASE_URL = resolveDefaultApiBaseUrl();
 
 export function normalizeServerUrl(raw: string): string {
   const trimmed = raw.trim().replace(/\/+$/, '');

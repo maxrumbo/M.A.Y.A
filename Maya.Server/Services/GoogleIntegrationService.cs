@@ -1,5 +1,6 @@
 using Google.Apis.Auth.OAuth2;
 using Google.Apis.Auth.OAuth2.Flows;
+using Google.Apis.Auth.OAuth2.Requests;
 using Google.Apis.Calendar.v3;
 using Google.Apis.Calendar.v3.Data;
 using Google.Apis.Gmail.v1;
@@ -28,7 +29,7 @@ namespace Maya.Server.Services;
 public class GoogleIntegrationService : IGoogleIntegrationService
 {
     private readonly IConfiguration _config;
-    private readonly IVaultService _vaultService;
+    private readonly ISecretProtector _protector;
     private readonly MayaDbContext _db;
     private readonly ILogger<GoogleIntegrationService> _logger;
 
@@ -50,12 +51,12 @@ public class GoogleIntegrationService : IGoogleIntegrationService
 
     public GoogleIntegrationService(
         IConfiguration config,
-        IVaultService vaultService,
+        ISecretProtector protector,
         MayaDbContext db,
         ILogger<GoogleIntegrationService> logger)
     {
         _config       = config;
-        _vaultService = vaultService;
+        _protector    = protector;
         _db           = db;
         _logger       = logger;
 
@@ -68,39 +69,63 @@ public class GoogleIntegrationService : IGoogleIntegrationService
                                "Integrasi Google tidak aktif. Set via dotnet user-secrets untuk mengaktifkan.");
     }
 
-    public string GetAuthorizationUrl(string state)
+    public string GetAuthorizationUrl(string state, string? callbackUrl = null)
     {
         EnsureConfigured();
 
         var flow = CreateFlow();
-        return flow.CreateAuthorizationCodeRequest(_callbackUrl)
-            .Build()
-            .AbsoluteUri + $"&state={Uri.EscapeDataString(state)}";
+        var request = flow.CreateAuthorizationCodeRequest(callbackUrl ?? _callbackUrl);
+
+        // access_type=offline + prompt=consent → Google selalu mengembalikan refresh token
+        if (request is GoogleAuthorizationCodeRequestUrl googleRequest)
+        {
+            googleRequest.AccessType = "offline";
+            googleRequest.Prompt     = "consent";
+        }
+
+        request.State = state;
+        return request.Build().AbsoluteUri;
     }
 
-    public async Task HandleCallbackAsync(string code, string state)
+    public async Task HandleCallbackAsync(string code, string state, string? callbackUrl = null)
     {
         EnsureConfigured();
 
         var flow = CreateFlow();
-        var token = await flow.ExchangeCodeForTokenAsync("maxwell", code, _callbackUrl, CancellationToken.None);
+        var token = await flow.ExchangeCodeForTokenAsync("maxwell", code, callbackUrl ?? _callbackUrl, CancellationToken.None);
 
         if (string.IsNullOrEmpty(token.RefreshToken))
-            throw new InvalidOperationException("Google tidak mengembalikan refresh token. Pastikan 'access_type=offline' dan 'prompt=consent'.");
+            throw new InvalidOperationException("Google tidak mengembalikan refresh token. Cabut akses M.A.Y.A. di myaccount.google.com/permissions lalu coba hubungkan lagi.");
 
-        // Simpan encrypted refresh token ke user_auth_configs
+        // Single-owner: baris user_auth_configs dibuat saat setup PIN. Tanpa baris itu, OAuth tidak bisa disimpan.
         var config = await _db.UserAuthConfigs.FirstOrDefaultAsync()
-            ?? new UserAuthConfig { Id = Guid.NewGuid() };
+            ?? throw new InvalidOperationException("Master PIN belum disetup. Setup PIN dahulu sebelum menghubungkan Google.");
 
-        // Enkripsi menggunakan VaultMasterKey yang sudah ada
-        config.GoogleRefreshTokenEnc = token.RefreshToken; // TODO: encrypt dengan AES-256-GCM via VaultService
+        // Phase 8: refresh token dienkripsi AES-256-GCM (Maya:VaultMasterKey) — TIDAK PERNAH plaintext di DB.
+        config.GoogleRefreshTokenEnc = _protector.Protect(token.RefreshToken);
         config.UpdatedAt = DateTimeOffset.UtcNow;
 
-        if (!await _db.UserAuthConfigs.AnyAsync())
-            _db.UserAuthConfigs.Add(config);
-
         await _db.SaveChangesAsync();
-        _logger.LogInformation("Google OAuth2 refresh token berhasil disimpan.");
+        _logger.LogInformation("Google OAuth2 refresh token berhasil disimpan (terenkripsi).");
+    }
+
+    public async Task<bool> IsConnectedAsync()
+    {
+        var enc = await _db.UserAuthConfigs
+            .Select(c => c.GoogleRefreshTokenEnc)
+            .FirstOrDefaultAsync();
+        return !string.IsNullOrEmpty(enc);
+    }
+
+    public async Task DisconnectAsync()
+    {
+        var config = await _db.UserAuthConfigs.FirstOrDefaultAsync();
+        if (config is null || string.IsNullOrEmpty(config.GoogleRefreshTokenEnc)) return;
+
+        config.GoogleRefreshTokenEnc = null;
+        config.UpdatedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync();
+        _logger.LogInformation("Koneksi Google diputus (refresh token dihapus).");
     }
 
     // ─── Gmail ───────────────────────────────────────────────────────────────
@@ -261,12 +286,22 @@ public class GoogleIntegrationService : IGoogleIntegrationService
             ?? throw new InvalidOperationException("Google refresh token belum ada. Lakukan OAuth flow terlebih dahulu via /api/integrations/google/authorize.");
 
         if (string.IsNullOrEmpty(config.GoogleRefreshTokenEnc))
-            throw new InvalidOperationException("Google refresh token belum disimpan. Lakukan OAuth flow terlebih dahulu.");
+            throw new InvalidOperationException("Google belum terhubung. Hubungkan akun Google dari panel Integrasi di aplikasi M.A.Y.A.");
+
+        // Migrasi otomatis: jika masih tersimpan plaintext (legacy), enkripsi sekarang juga.
+        if (!_protector.IsProtected(config.GoogleRefreshTokenEnc))
+        {
+            var legacy = config.GoogleRefreshTokenEnc;
+            config.GoogleRefreshTokenEnc = _protector.Protect(legacy);
+            config.UpdatedAt = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync();
+            _logger.LogInformation("Google refresh token legacy dimigrasi ke format terenkripsi.");
+        }
 
         var flow = CreateFlow();
         var token = new Google.Apis.Auth.OAuth2.Responses.TokenResponse
         {
-            RefreshToken = config.GoogleRefreshTokenEnc // Simplified: in production, decrypt first
+            RefreshToken = _protector.Unprotect(config.GoogleRefreshTokenEnc)
         };
 
         return new UserCredential(flow, "maxwell", token);

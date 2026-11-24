@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { Shield, KeyRound, Fingerprint, Loader2, AlertCircle } from 'lucide-react';
+import { Shield, KeyRound, Fingerprint, Loader2, AlertCircle, Settings, Server } from 'lucide-react';
 import { api } from '../api/client';
+import { getApiBaseUrl } from '../services/serverConfig';
+import { ServerSettingsModal } from './ServerSettingsModal';
 
 interface LockScreenProps {
   onUnlocked: () => void;
@@ -10,6 +12,8 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlocked }) => {
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showServerSettings, setShowServerSettings] = useState(false);
+  const [serverUrl, setServerUrl] = useState<string>(getApiBaseUrl());
 
   const handleKeyPress = (num: string) => {
     if (pin.length < 8) {
@@ -57,6 +61,17 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlocked }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950 p-4 select-none">
+      {/* Phase 7: Pengaturan Server Endpoint URL */}
+      <button
+        type="button"
+        onClick={() => setShowServerSettings(true)}
+        title="Pengaturan Server Endpoint URL"
+        className="fixed top-4 right-4 flex items-center space-x-1.5 px-3 py-2 rounded-xl border border-zinc-800 bg-zinc-900/90 text-xs text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition-colors"
+      >
+        <Settings className="h-4 w-4 text-indigo-400" />
+        <span className="hidden sm:inline">Server</span>
+      </button>
+
       <div className="w-full max-w-sm flex flex-col items-center">
         {/* Logo & Branding */}
         <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-900 border border-zinc-800 text-indigo-400 shadow-xl shadow-black/40 mb-4">
@@ -156,7 +171,28 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlocked }) => {
             <span>Windows Hello / Passkey</span>
           </button>
         </div>
+
+        {/* Active Server URL Indicator */}
+        <button
+          type="button"
+          onClick={() => setShowServerSettings(true)}
+          className="mt-6 flex items-center space-x-1.5 text-[11px] font-mono text-zinc-500 hover:text-zinc-300 transition-colors"
+          title="Ketuk untuk mengubah alamat server"
+        >
+          <Server className="h-3 w-3 text-zinc-600" />
+          <span className="truncate max-w-[260px]">{serverUrl}</span>
+        </button>
       </div>
+
+      {showServerSettings && (
+        <ServerSettingsModal
+          onClose={() => setShowServerSettings(false)}
+          onSaved={(newUrl) => {
+            setServerUrl(newUrl);
+            setError(null);
+          }}
+        />
+      )}
     </div>
   );
 };

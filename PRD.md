@@ -755,6 +755,26 @@ Mengunci seluruh sistem dengan autentikasi perangkat (Biometrik/PIN), menghidupk
 
 ---
 
+# 13.3 PHASE 7: NATIVE ANDROID INTEGRATION & MOBILE READINESS
+
+* **Konfigurasi Android & Cleartext (`maya-client/android`):**
+  * `capacitor.config.ts` memakai `androidScheme: 'http'` + `cleartext: true` dan `AndroidManifest.xml` mengaktifkan `android:usesCleartextTraffic="true"` agar APK dapat mengakses `Maya.Server` via HTTP LAN / Tailscale tanpa diblokir *mixed content* WebView.
+  * Izin manifest: `INTERNET`, `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS`, `VIBRATE`, serta `<queries>` untuk `RecognitionService` dan `TTS_SERVICE` (Android 11+).
+  * *Catatan Keamanan:* Prioritaskan IP Tailscale (`100.64.0.0/10`, sudah terenkripsi WireGuard) saat berada di jaringan Wi-Fi publik.
+* **Dynamic Server Endpoint URL (`maya-client`):**
+  * `serverConfig.ts` & `ServerSettingsModal.tsx` (diakses dari `LockScreen` maupun `Sidebar`): menyimpan override URL di `localStorage['maya_server_url']` dengan fallback `VITE_API_BASE_URL`, validasi format, riwayat 5 URL terakhir, dan tombol **Test Koneksi** (`/health`, timeout 4 detik).
+  * Mengubah URL otomatis menghentikan SignalR lama dan membersihkan JWT lama agar login ulang ke server baru bersih.
+* **Native STT & Prioritas Suara Perempuan Indonesia:**
+  * `CapacitorSttProvider` (`@capacitor-community/speech-recognition` v7) otomatis aktif di APK native melalui kontrak `ISttProvider` Phase 6A (runtime mic permission & partial results).
+  * Default TTS di Web (`ttsService.ts`), Windows (`AudioAlertService.cs`), dan Android (`MayaNativePlugin.java`) memprioritaskan suara perempuan Indonesia (`Gadis` / `female` / `id-ID` non-male), selaras dengan persona asisten perempuan hangat, cerdas, dan luwes di `GeminiService.cs`.
+* **Mode "Find My Phone" & Hardening SignalR (`Maya.Server` + `MayaNative`):**
+  * **Hardening `MayaHub`:** Koneksi client non-Agent tanpa JWT valid ditolak (`Context.Abort()`). CORS diperluas mencakup CGNAT/Tailscale (`100.64.0.0/10`).
+  * `MobileDeviceService` + `MobileController` (`/api/mobile/status`, `POST /api/mobile/find-me`, `POST /api/mobile/find-me/stop`) dengan cooldown terpisah per perangkat (`laptop` vs `phone`) dan tool Gemini `find_my_device(device="phone")` aktif.
+  * Plugin native Java `MayaNative` (`MayaNativePlugin.java` terdaftar di `MainActivity.java`): menyimpan volume `STREAM_ALARM` → naikkan ke maks → putar alarm `USAGE_ALARM` + getar berpola + TTS *"Aku di sini, Max!"* → **selalu mengembalikan volume alarm di blok `finally`**, dilengkapi overlay layar penuh tombol **STOP ALARM** di UI HP dan kartu **Find My Phone** di `LaptopControlView`.
+  * *Ditunda ke Phase 7B:* Android Foreground Service untuk menjaga koneksi SignalR saat layar mati lama.
+
+---
+
 # 14. GLOBAL NON-FUNCTIONAL REQUIREMENTS & ERROR HANDLING
 
 1. **Latency Targets:**

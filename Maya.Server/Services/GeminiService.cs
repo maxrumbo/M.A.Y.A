@@ -24,6 +24,7 @@ public class GeminiService : IGeminiService
     private readonly IMemoryService _memoryService;
     private readonly IAgentDispatcherService _dispatcher;
     private readonly IAgentSettingsService _agentSettings;
+    private readonly IMobileDeviceService _mobileDevices;
     private readonly IGoogleIntegrationService _googleService;
     private readonly MayaDbContext _db;
     private readonly ILogger<GeminiService> _logger;
@@ -48,6 +49,7 @@ public class GeminiService : IGeminiService
         IMemoryService memoryService,
         IAgentDispatcherService dispatcher,
         IAgentSettingsService agentSettings,
+        IMobileDeviceService mobileDevices,
         IGoogleIntegrationService googleService,
         MayaDbContext db,
         ILogger<GeminiService> logger)
@@ -57,6 +59,7 @@ public class GeminiService : IGeminiService
         _memoryService     = memoryService;
         _dispatcher        = dispatcher;
         _agentSettings     = agentSettings;
+        _mobileDevices     = mobileDevices;
         _googleService     = googleService;
         _db                = db;
         _logger            = logger;
@@ -246,6 +249,13 @@ public class GeminiService : IGeminiService
         // ── Persona Inti ──────────────────────────────────────────────────────
         sb.AppendLine("""
             Kamu adalah M.A.Y.A. (Maxwell Admires, Yet Awaits) — asisten pribadi eksklusif, sekretaris personal, coding companion, dan teman diskusi utama milik Maxwell Avinda Rumahorbo. Kamu hanya melayani Maxwell dan tidak ada orang lain.
+
+            ## Identitas & Gaya Bicara (WAJIB KONSISTEN)
+            - Kamu adalah sosok asisten PEREMPUAN: hangat, cerdas, luwes, dan tenang. Karakter ini juga dibawakan oleh suara perempuan Indonesia saat kamu berbicara lewat TTS (di laptop maupun HP).
+            - Gunakan bahasa Indonesia yang natural, santai, dan enak didengar. Sebut dirimu "aku" dan Maxwell dengan "kamu" (atau panggilan di bawah). Hindari gaya bicara kaku seperti robot.
+            - Hangat tapi tidak lebay: perhatian tulus, humor ringan bila cocok, tidak menggurui. Cerdas tapi tidak pamer: jelaskan dengan jernih dan ringkas.
+            - Luwes: sesuaikan nada dengan suasana Maxwell (lihat Adaptive Tone). Pertahankan identitasmu sebagai M.A.Y.A. secara konsisten dalam setiap percakapan.
+            - Balasanmu sering dibacakan keras, jadi tulis kalimat yang enak diucapkan: hindari rentetan simbol, tabel panjang, atau emoji berlebihan kecuali memang perlu.
 
             ## Karakter Inti
             - Helpful, caring (perhatian tulus, tidak berlebihan atau lebay)
@@ -473,7 +483,7 @@ public class GeminiService : IGeminiService
 
             new GeminiFunctionDeclaration(
                 Name:        "find_my_device",
-                Description: "Membunyikan alarm ping dan suara lantang di perangkat Maxwell untuk membantu menemukannya (Mode Find-Me). Low-Risk, langsung dieksekusi tanpa konfirmasi PIN.",
+                Description: "Membunyikan alarm, getar, dan suara lantang di perangkat Maxwell untuk membantu menemukannya (Mode Find-Me). device='laptop' memanggil laptop Windows; device='phone' memanggil HP Android yang sedang membuka aplikasi M.A.Y.A. Low-Risk, langsung dieksekusi tanpa konfirmasi PIN.",
                 Parameters: new
                 {
                     type = "OBJECT",
@@ -714,11 +724,12 @@ public class GeminiService : IGeminiService
 
         if (device == "phone")
         {
-            return (
-                "Perangkat HP Android Maxwell belum terhubung untuk fitur Find-Me. " +
-                "Fitur ping HP akan tersedia setelah Phase Android (Capacitor + FCM) diaktifkan.",
-                null
-            );
+            var phoneDuration = args.TryGetProperty("duration_seconds", out var pdEl) && pdEl.ValueKind == JsonValueKind.Number
+                ? Math.Clamp(pdEl.GetInt32(), 1, 30)
+                : 10;
+
+            var phoneResult = await _mobileDevices.FindMyPhoneAsync(phoneDuration, null);
+            return (phoneResult.Message, null);
         }
 
         if (device != "laptop")

@@ -349,16 +349,31 @@ public class AudioAlertService : IDisposable
                 synth.SetOutputToDefaultAudioDevice();
                 synth.Rate = 1; // Sedikit sigap
 
-                // Prioritaskan voice bahasa Indonesia jika terpasang di Windows
-                var idVoiceName = synth.GetInstalledVoices()
+                // Prioritaskan suara PEREMPUAN bahasa Indonesia (Gadis / Female / id-ID),
+                // fallback ke suara perempuan lain jika voice id-ID belum terpasang di Windows
+                var installedVoices = synth.GetInstalledVoices()
                     .Where(v => v.Enabled && v.VoiceInfo is not null && !string.IsNullOrWhiteSpace(v.VoiceInfo.Name))
                     .Select(v => v.VoiceInfo!)
-                    .FirstOrDefault(v => v.Culture?.Name?.StartsWith("id", StringComparison.OrdinalIgnoreCase) == true)
-                    ?.Name;
+                    .ToList();
 
-                if (!string.IsNullOrWhiteSpace(idVoiceName))
+                var preferredVoice =
+                    installedVoices.FirstOrDefault(v =>
+                        (v.Name ?? string.Empty).Contains("Gadis", StringComparison.OrdinalIgnoreCase))
+                    ?? installedVoices.FirstOrDefault(v =>
+                        v.Culture?.Name?.StartsWith("id", StringComparison.OrdinalIgnoreCase) == true &&
+                        (v.Gender == VoiceGender.Female || (v.Name ?? string.Empty).Contains("Female", StringComparison.OrdinalIgnoreCase)))
+                    ?? installedVoices.FirstOrDefault(v =>
+                        v.Culture?.Name?.StartsWith("id", StringComparison.OrdinalIgnoreCase) == true &&
+                        !(v.Name ?? string.Empty).Contains("Ardi", StringComparison.OrdinalIgnoreCase) &&
+                        v.Gender != VoiceGender.Male)
+                    ?? installedVoices.FirstOrDefault(v =>
+                        v.Culture?.Name?.StartsWith("id", StringComparison.OrdinalIgnoreCase) == true)
+                    ?? installedVoices.FirstOrDefault(v =>
+                        v.Gender == VoiceGender.Female || (v.Name ?? string.Empty).Contains("Zira", StringComparison.OrdinalIgnoreCase));
+
+                if (preferredVoice is not null && !string.IsNullOrWhiteSpace(preferredVoice.Name))
                 {
-                    synth.SelectVoice(idVoiceName);
+                    synth.SelectVoice(preferredVoice.Name);
                 }
 
                 using var reg = ct.Register(() =>

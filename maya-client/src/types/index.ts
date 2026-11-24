@@ -91,3 +91,13 @@ export interface WakeWordHeardEvent {
   phrase: string;
   timestamp: string;
 }
+
+export interface MobileStatus {
+  onlineDevices: number;
+  isFindMeActive: boolean;
+}
+
+export interface FindMeRequest {
+  durationSeconds?: number | null;
+  message?: string | null;
+}

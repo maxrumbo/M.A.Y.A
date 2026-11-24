@@ -22,10 +22,11 @@ import {
   Ear,
   BatteryCharging,
   ShieldCheck,
+  Smartphone,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { signalRService } from '../services/signalr';
-import type { DeviceStatus, AgentSettings, WakeWordStatus } from '../types';
+import type { DeviceStatus, AgentSettings, WakeWordStatus, MobileStatus } from '../types';
 
 interface LaptopControlViewProps {
   deviceStatus: DeviceStatus | null;
@@ -53,9 +54,19 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
     updatedAt: new Date().toISOString(),
   });
   const [savingWake, setSavingWake] = useState<boolean>(false);
+  const [mobileStatus, setMobileStatus] = useState<MobileStatus>({
+    onlineDevices: 0,
+    isFindMeActive: false,
+  });
+  const [phoneFeedback, setPhoneFeedback] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
 
   const findMeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const phoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isOnline = deviceStatus?.isOnline ?? false;
+  const isPhoneOnline = mobileStatus.onlineDevices > 0;
 
   useEffect(() => {
     api
@@ -66,6 +77,13 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
         setFindMeActive(res.isFindMeActive);
       })
       .catch(() => {});
+
+    api
+      .getMobileStatus()
+      .then(setMobileStatus)
+      .catch(() => {});
+
+    const unsubMobileStatus = signalRService.onMobileStatusChange(setMobileStatus);
 
     const unsubWakeStatus = signalRService.onWakeWordStatus((status) => {
       setWakeStatus((prev) => ({
@@ -87,11 +105,71 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
     return () => {
       unsubWakeStatus();
       unsubWakeHeard();
+      unsubMobileStatus();
       if (findMeTimerRef.current) {
         clearTimeout(findMeTimerRef.current);
       }
+      if (phoneTimerRef.current) {
+        clearTimeout(phoneTimerRef.current);
+      }
     };
   }, []);
+
+  const handleFindMyPhone = async () => {
+    if (!isPhoneOnline) {
+      setPhoneFeedback({
+        type: 'error',
+        text: 'HP belum terhubung. Buka aplikasi M.A.Y.A. di HP terlebih dahulu.',
+      });
+      return;
+    }
+
+    setExecuting('Find My Phone');
+    setPhoneFeedback(null);
+    try {
+      const res = await api.findMyPhone(10);
+      setMobileStatus((prev) => ({ ...prev, isFindMeActive: true }));
+      setPhoneFeedback({
+        type: 'success',
+        text: res.message || 'Ping Find-Me terkirim ke HP.',
+      });
+
+      if (phoneTimerRef.current) clearTimeout(phoneTimerRef.current);
+      phoneTimerRef.current = setTimeout(() => {
+        setMobileStatus((prev) => ({ ...prev, isFindMeActive: false }));
+      }, 10500);
+    } catch (err: any) {
+      setPhoneFeedback({
+        type: 'error',
+        text: err.message || 'Gagal mengirim ping ke HP.',
+      });
+    } finally {
+      setExecuting(null);
+    }
+  };
+
+  const handleStopFindMyPhone = async () => {
+    setExecuting('Stop Find My Phone');
+    try {
+      const status = await api.stopFindMyPhone();
+      setMobileStatus(status);
+      if (phoneTimerRef.current) {
+        clearTimeout(phoneTimerRef.current);
+        phoneTimerRef.current = null;
+      }
+      setPhoneFeedback({
+        type: 'info',
+        text: 'Perintah hentikan alarm dikirim ke HP.',
+      });
+    } catch (err: any) {
+      setPhoneFeedback({
+        type: 'error',
+        text: err.message || 'Gagal menghentikan alarm HP.',
+      });
+    } finally {
+      setExecuting(null);
+    }
+  };
 
   const handleFindMyLaptop = async () => {
     if (!isOnline) {
@@ -425,6 +503,86 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
                     Terakhir terdengar: &ldquo;{wakeStatus.lastHeardPhrase}&rdquo;
                     {wakeStatus.lastHeardAt ? ` • ${formatShortTime(wakeStatus.lastHeardAt)}` : ''}
                   </p>
+                )}
+              </div>
+            </div>
+
+            {/* Card 3 (Phase 7): Find My Phone */}
+            <div className="md:col-span-2 p-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 flex flex-col justify-between space-y-3">
+              <div className="flex items-start justify-between space-x-3">
+                <div className="flex items-start space-x-3">
+                  <div className="p-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-indigo-400 shrink-0">
+                    <Smartphone
+                      className={`h-4 w-4 ${mobileStatus.isFindMeActive ? 'animate-bounce' : ''}`}
+                    />
+                  </div>
+                  <div>
+                    <h4 className="font-medium text-sm text-zinc-100">Find My Phone (HP Android)</h4>
+                    <p className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
+                      Kirim ping alarm, getar, dan suara &ldquo;Aku di sini, Max!&rdquo; ke HP yang sedang membuka aplikasi M.A.Y.A.
+                    </p>
+                  </div>
+                </div>
+
+                <span
+                  className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full border text-[10px] font-mono shrink-0 ${
+                    isPhoneOnline
+                      ? 'bg-emerald-950/80 text-emerald-400 border-emerald-800/80'
+                      : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      isPhoneOnline ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'
+                    }`}
+                  />
+                  <span>
+                    {isPhoneOnline ? `${mobileStatus.onlineDevices} HP Online` : 'HP Offline'}
+                  </span>
+                </span>
+              </div>
+
+              {phoneFeedback && (
+                <div
+                  className={`px-3 py-2 rounded-xl border text-[11px] ${
+                    phoneFeedback.type === 'success'
+                      ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
+                      : phoneFeedback.type === 'error'
+                      ? 'bg-red-950/40 border-red-800/60 text-red-300'
+                      : 'bg-zinc-950 border-zinc-800 text-zinc-300'
+                  }`}
+                >
+                  {phoneFeedback.text}
+                </div>
+              )}
+
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={handleFindMyPhone}
+                  disabled={!isPhoneOnline || !!executing}
+                  title={
+                    !isPhoneOnline
+                      ? 'HP belum terhubung. Buka aplikasi M.A.Y.A. di HP.'
+                      : 'Bunyikan alarm Find My Phone di HP'
+                  }
+                  className="flex-1 flex items-center justify-center space-x-2 px-3.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                >
+                  <Smartphone className="h-3.5 w-3.5" />
+                  <span>
+                    {mobileStatus.isFindMeActive ? 'Ping HP Terkirim...' : 'Find My Phone (Ping)'}
+                  </span>
+                </button>
+
+                {mobileStatus.isFindMeActive && (
+                  <button
+                    onClick={handleStopFindMyPhone}
+                    disabled={!!executing}
+                    title="Hentikan alarm Find My Phone"
+                    className="flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-red-600/80 hover:bg-red-500 text-white text-xs font-medium transition-colors disabled:opacity-40"
+                  >
+                    <Square className="h-3.5 w-3.5 fill-white" />
+                    <span>Stop</span>
+                  </button>
                 )}
               </div>
             </div>

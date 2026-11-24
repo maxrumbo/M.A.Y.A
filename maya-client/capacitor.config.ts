@@ -5,7 +5,10 @@ const config: CapacitorConfig = {
   appName: 'M.A.Y.A.',
   webDir: 'dist',
   server: {
-    androidScheme: 'https'
+    // Gunakan http scheme agar WebView (origin http://localhost) dapat memanggil
+    // Maya.Server lokal via HTTP LAN / Tailscale tanpa diblokir mixed-content.
+    androidScheme: 'http',
+    cleartext: true
   }
 };
 

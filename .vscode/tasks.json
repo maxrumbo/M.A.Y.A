@@ -1,0 +1,151 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build-maya",
+      "type": "shell",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "Maya.slnx"
+      ],
+      "presentation": {
+        "echo": true,
+        "reveal": "silent",
+        "focus": false,
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "maya-server",
+      "type": "shell",
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--no-build",
+        "--project",
+        "Maya.Server",
+        "--urls",
+        "http://0.0.0.0:5063"
+      ],
+      "options": {
+        "env": {
+          "ASPNETCORE_ENVIRONMENT": "Development"
+        }
+      },
+      "dependsOn": [
+        "build-maya"
+      ],
+      "isBackground": true,
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": [
+        {
+          "pattern": {
+            "regexp": "^(fail|crit):\\s+(.*)$",
+            "message": 2
+          },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "^.*",
+            "endsPattern": "Now listening on:|Application started"
+          }
+        }
+      ]
+    },
+    {
+      "label": "maya-agent",
+      "type": "shell",
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--no-build",
+        "--project",
+        "Maya.Agent"
+      ],
+      "dependsOn": [
+        "build-maya"
+      ],
+      "isBackground": true,
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": [
+        {
+          "pattern": {
+            "regexp": "^(fail|crit):\\s+(.*)$",
+            "message": 2
+          },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "^.*",
+            "endsPattern": "M\\.A\\.Y\\.A\\. Windows Local Daemon starting|Berhasil terhubung"
+          }
+        }
+      ]
+    },
+    {
+      "label": "maya-client",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "dev",
+        "--",
+        "--host"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/maya-client"
+      },
+      "isBackground": true,
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": [
+        {
+          "pattern": {
+            "regexp": "^(ERROR|Error):\\s+(.*)$",
+            "message": 2
+          },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "^.*",
+            "endsPattern": "Local:|ready in"
+          }
+        }
+      ]
+    },
+    {
+      "label": "Run M.A.Y.A. All",
+      "dependsOn": [
+        "maya-server",
+        "maya-agent",
+        "maya-client"
+      ],
+      "dependsOrder": "parallel",
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}

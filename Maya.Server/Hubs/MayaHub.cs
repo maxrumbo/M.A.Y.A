@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using Maya.Server.Data;
 using Maya.Server.Data.Entities;
+using Maya.Server.Services;
 using Maya.Server.Services.Interfaces;
 using Maya.Shared.DTOs.Agent;
 using Maya.Shared.Interfaces;
@@ -21,6 +22,7 @@ public class MayaHub : Hub<IMayaHubClient>
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IAgentDispatcherService _dispatcher;
     private readonly IAgentSettingsService _agentSettings;
+    private readonly IMobileDeviceService _mobileDevices;
     private readonly ILogger<MayaHub> _logger;
 
     private const string LaptopGroup = "LaptopAgent";
@@ -31,12 +33,14 @@ public class MayaHub : Hub<IMayaHubClient>
         IServiceScopeFactory scopeFactory,
         IAgentDispatcherService dispatcher,
         IAgentSettingsService agentSettings,
+        IMobileDeviceService mobileDevices,
         ILogger<MayaHub> logger)
     {
         _config = config;
         _scopeFactory = scopeFactory;
         _dispatcher = dispatcher;
         _agentSettings = agentSettings;
+        _mobileDevices = mobileDevices;
         _logger = logger;
     }
 
@@ -100,6 +104,17 @@ public class MayaHub : Hub<IMayaHubClient>
         }
         else
         {
+            // Phase 7 hardening: client non-Agent WAJIB membawa JWT valid.
+            // Koneksi anonim ditolak agar tidak menerima broadcast (status laptop, wake-word, Find-Me).
+            if (Context.User?.Identity?.IsAuthenticated != true)
+            {
+                _logger.LogWarning(
+                    "Koneksi anonim ke MayaHub ditolak (ConnId: {ConnId}). Client wajib membawa JWT valid.",
+                    Context.ConnectionId);
+                Context.Abort();
+                return;
+            }
+
             _logger.LogInformation("Client connected to MayaHub: {ConnId}", Context.ConnectionId);
         }
 
@@ -108,6 +123,13 @@ public class MayaHub : Hub<IMayaHubClient>
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
+        // Phase 7: bersihkan registrasi HP Android (jika koneksi ini adalah HP)
+        if (_mobileDevices.Unregister(Context.ConnectionId))
+        {
+            _logger.LogInformation("HP Android terputus dari MayaHub: {ConnId}", Context.ConnectionId);
+            await Clients.All.MobileStatusChanged(_mobileDevices.GetStatus());
+        }
+
         if (Context.Items.TryGetValue("IsAgent", out var isAgentObj) && isAgentObj is true)
         {
             _logger.LogWarning("Maya.Agent disconnected: {ConnId}", Context.ConnectionId);
@@ -265,5 +287,33 @@ public class MayaHub : Hub<IMayaHubClient>
 
         await Clients.Others.WakeWordHeard(phrase, timestamp);
         await Clients.Others.WakeWordStatusChanged(_agentSettings.GetWakeWordStatus());
+    }
+
+    /// <summary>
+    /// Phase 7: Dipanggil oleh app Android (maya-client di dalam APK) setelah terhubung untuk mendaftarkan
+    /// HP sebagai target "Find My Phone". Hanya untuk koneksi ber-JWT valid (bukan Agent).
+    /// </summary>
+    public async Task RegisterMobileDevice(string deviceId)
+    {
+        if (Context.Items.ContainsKey("IsAgent") || Context.User?.Identity?.IsAuthenticated != true)
+        {
+            _logger.LogWarning("RegisterMobileDevice ditolak: koneksi tidak terautentikasi sebagai client mobile.");
+            return;
+        }
+
+        var safeId = new string((deviceId ?? string.Empty)
+            .Where(c => char.IsLetterOrDigit(c) || c == '-' || c == '_')
+            .Take(64)
+            .ToArray());
+        if (string.IsNullOrWhiteSpace(safeId))
+        {
+            safeId = "maxwell-phone";
+        }
+
+        _mobileDevices.Register(Context.ConnectionId, safeId);
+        await Groups.AddToGroupAsync(Context.ConnectionId, MobileDeviceService.MobileGroup);
+
+        _logger.LogInformation("HP Android terdaftar sebagai target Find-Me (device: {DeviceId}).", safeId);
+        await Clients.All.MobileStatusChanged(_mobileDevices.GetStatus());
     }
 }

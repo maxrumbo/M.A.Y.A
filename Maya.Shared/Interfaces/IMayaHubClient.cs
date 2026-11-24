@@ -40,4 +40,19 @@ public interface IMayaHubClient
     /// Phase 6B: Dibroadcast ke Web/Mobile UI saat Maya.Agent mendeteksi frasa wake-word.
     /// </summary>
     Task WakeWordHeard(string phrase, DateTimeOffset timestamp);
+
+    /// <summary>
+    /// Phase 7: Dikirim server ke HP Android (group MobileDevices) untuk membunyikan alarm Find-Me.
+    /// </summary>
+    Task FindMyPhoneRequested(FindMeRequestDto request);
+
+    /// <summary>
+    /// Phase 7: Dikirim server ke HP Android untuk menghentikan alarm Find-Me.
+    /// </summary>
+    Task StopFindMyPhone();
+
+    /// <summary>
+    /// Phase 7: Dibroadcast ke UI saat jumlah HP online atau status Find-Me HP berubah.
+    /// </summary>
+    Task MobileStatusChanged(MobileStatusDto status);
 }

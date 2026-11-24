@@ -119,6 +119,7 @@ builder.Services.AddHostedService<ProactiveSchedulerService>();
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<IAgentDispatcherService, AgentDispatcherService>();
 builder.Services.AddSingleton<IAgentSettingsService, AgentSettingsService>();
+builder.Services.AddSingleton<IMobileDeviceService, MobileDeviceService>();
 
 // ─── Controllers ─────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
@@ -210,6 +211,8 @@ builder.Services.AddCors(options =>
                     if (bytes[0] == 10) return true;
                     if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true;
                     if (bytes[0] == 192 && bytes[1] == 168) return true;
+                    // Tailscale / CGNAT (100.64.0.0/10)
+                    if (bytes[0] == 100 && bytes[1] >= 64 && bytes[1] <= 127) return true;
                 }
 
                 return false;
@@ -227,12 +230,30 @@ builder.Logging.AddConsole();
 
 var app = builder.Build();
 
-// ─── Seed Initial Memories (Phase 2) ──────────────────────────────────────────
-using (var scope = app.Services.CreateScope())
+// ─── Seed Initial Memories (Phase 2 — Resilient Non-Blocking Startup) ────────
+// Dijalankan asinkron setelah server mulai berjalan dan dibungkus try-catch agar
+// jika Supabase sedang timeout/offline, Maya.Server langsung aktif di port 5063
+// (endpoint /health, SignalR, dan Find-Me tetap berjalan tanpa crash atau delay).
+app.Lifetime.ApplicationStarted.Register(() =>
 {
-    var memoryService = scope.ServiceProvider.GetRequiredService<IMemoryService>();
-    await memoryService.SeedInitialMemoriesAsync();
-}
+    _ = Task.Run(async () =>
+    {
+        using var scope = app.Services.CreateScope();
+        var startupLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        try
+        {
+            var memoryService = scope.ServiceProvider.GetRequiredService<IMemoryService>();
+            await memoryService.SeedInitialMemoriesAsync();
+        }
+        catch (Exception ex)
+        {
+            startupLogger.LogWarning(
+                ex,
+                "Gagal menjalankan SeedInitialMemoriesAsync saat startup (kemungkinan database sedang timeout/offline). " +
+                "Server tetap berjalan — cek /health untuk status koneksi DB.");
+        }
+    });
+});
 
 // ─── Middleware Pipeline ───────────────────────────────────────────────────────
 // GlobalExceptionMiddleware WAJIB paling awal agar menangkap semua exception.
@@ -270,7 +291,8 @@ app.MapGet("/health", async (MayaDbContext db, ILogger<Program> logger) =>
 {
     try
     {
-        var canConnect = await db.Database.CanConnectAsync();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var canConnect = await db.Database.CanConnectAsync(cts.Token);
 
         if (canConnect)
         {
@@ -287,6 +309,16 @@ app.MapGet("/health", async (MayaDbContext db, ILogger<Program> logger) =>
         {
             status    = "Degraded",
             database  = "Disconnected",
+            timestamp = DateTimeOffset.UtcNow
+        });
+    }
+    catch (OperationCanceledException)
+    {
+        logger.LogWarning("Health check: timeout (>3 detik) saat memeriksa koneksi database.");
+        return Results.Ok(new
+        {
+            status    = "Degraded",
+            database  = "Timeout",
             timestamp = DateTimeOffset.UtcNow
         });
     }

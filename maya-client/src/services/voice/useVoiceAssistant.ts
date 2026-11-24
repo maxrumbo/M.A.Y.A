@@ -1,7 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { Capacitor } from '@capacitor/core';
 import type { VoiceState, VoiceSettings, ISttProvider } from './types';
 import { defaultSttProvider } from './sttService';
+import { CapacitorSttProvider } from './capacitorSttService';
 import { ttsService } from './ttsService';
+
+function createPlatformSttProvider(): ISttProvider {
+  if (Capacitor.isNativePlatform()) {
+    return new CapacitorSttProvider();
+  }
+  return defaultSttProvider;
+}
 
 const SETTINGS_KEY = 'maya_voice_settings';
 
@@ -49,7 +58,7 @@ export function useVoiceAssistant({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [settings, setSettings] = useState<VoiceSettings>(loadSettings);
 
-  const sttRef = useRef<ISttProvider>(defaultSttProvider);
+  const sttRef = useRef<ISttProvider>(createPlatformSttProvider());
   const silenceTimerRef = useRef<any>(null);
   const transcriptRef = useRef<string>('');
   const settingsRef = useRef<VoiceSettings>(settings);

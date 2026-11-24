@@ -7,10 +7,11 @@ import type {
   MuteStatus,
   AgentSettings,
   WakeWordStateResponse,
+  MobileStatus,
 } from '../types';
+import { getApiBaseUrl } from '../services/serverConfig';
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || 'http://localhost:5063';
+export { getApiBaseUrl };
 
 const TOKEN_KEY = 'maya_access_token';
 
@@ -36,7 +37,7 @@ async function apiRequest<T>(
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  const response = await fetch(`${getApiBaseUrl()}${endpoint}`, {
     ...options,
     headers,
   });
@@ -161,6 +162,24 @@ export const api = {
     apiRequest<WakeWordStateResponse>('/api/agent/wake-word', {
       method: 'PUT',
       body: JSON.stringify(settings),
+    }),
+
+  // ─── Phase 7: Mobile (Find My Phone) ───
+  getMobileStatus: () =>
+    apiRequest<MobileStatus>('/api/mobile/status'),
+
+  findMyPhone: (durationSeconds = 10, message?: string) =>
+    apiRequest<{ deviceCount: number; message: string; sentAt: string }>(
+      '/api/mobile/find-me',
+      {
+        method: 'POST',
+        body: JSON.stringify({ durationSeconds, message }),
+      }
+    ),
+
+  stopFindMyPhone: () =>
+    apiRequest<MobileStatus>('/api/mobile/find-me/stop', {
+      method: 'POST',
     }),
 
   // ─── Vault ───

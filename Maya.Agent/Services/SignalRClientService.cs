@@ -117,22 +117,47 @@ public class SignalRClientService : IAsyncDisposable
             return Task.CompletedTask;
         };
 
-        try
+        // Retry loop koneksi awal (jeda 2 detik) agar tetap tersambung meski Maya.Agent
+        // menyala paralel beberapa saat sebelum Maya.Server selesai membuka port 5063.
+        var attempt = 0;
+        while (!cancellationToken.IsCancellationRequested)
         {
-            await _hubConnection.StartAsync(cancellationToken);
-            _logger.LogInformation("Berhasil terhubung ke MayaHub via SignalR! (State: {State})", _hubConnection.State);
+            attempt++;
+            try
+            {
+                await _hubConnection.StartAsync(cancellationToken);
+                _logger.LogInformation("Berhasil terhubung ke MayaHub via SignalR! (State: {State}, Attempt: {Attempt})",
+                    _hubConnection.State, attempt);
 
-            // Kirim heartbeat pertama & status wake-word segera setelah terhubung
-            await SendHeartbeatAsync();
-            await ReportWakeWordStatusAsync(_wakeWordListener.CurrentStatus);
+                // Kirim heartbeat pertama & status wake-word segera setelah terhubung
+                await SendHeartbeatAsync();
+                await ReportWakeWordStatusAsync(_wakeWordListener.CurrentStatus);
 
-            // Mulai loop heartbeat berkala
-            _heartbeatCts = new CancellationTokenSource();
-            _heartbeatTask = HeartbeatLoopAsync(_heartbeatCts.Token);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Gagal memulai koneksi ke MayaHub. Daemon akan mencoba terhubung kembali di background.");
+                // Mulai loop heartbeat berkala
+                _heartbeatCts = new CancellationTokenSource();
+                _heartbeatTask = HeartbeatLoopAsync(_heartbeatCts.Token);
+                return;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("Percobaan koneksi awal ke MayaHub dibatalkan (daemon shutting down).");
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    "Belum dapat terhubung ke MayaHub (percobaan #{Attempt}): {Msg}. Mencoba lagi dalam 2 detik...",
+                    attempt, ex.Message);
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
         }
     }
 

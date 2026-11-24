@@ -8,8 +8,8 @@ using Microsoft.AspNetCore.SignalR;
 namespace Maya.Server.Services;
 
 /// <summary>
-/// Phase 6B: Sumber kebenaran pengaturan Wake-Word & Hemat Baterai (tersimpan di App_Data/agent-settings.json),
-/// melacak status live WakeWordStatusDto dari Maya.Agent, dan menerapkan cooldown Find-Me.
+/// Phase 6B/7: Sumber kebenaran pengaturan Wake-Word & Hemat Baterai (tersimpan di App_Data/agent-settings.json),
+/// melacak status live WakeWordStatusDto dari Maya.Agent, dan menerapkan cooldown Find-Me per perangkat.
 /// </summary>
 public class AgentSettingsService : IAgentSettingsService
 {
@@ -19,12 +19,13 @@ public class AgentSettingsService : IAgentSettingsService
     private readonly object _syncLock = new();
 
     private const string LaptopGroup = "LaptopAgent";
+    private const string LaptopKey = "laptop";
     private const int FindMeCooldownSeconds = 10;
 
     private AgentSettingsDto _settings;
     private WakeWordStatusDto _wakeWordStatus;
-    private DateTimeOffset _findMeCooldownUntil = DateTimeOffset.MinValue;
-    private DateTimeOffset _findMeActiveUntil = DateTimeOffset.MinValue;
+    private readonly Dictionary<string, DateTimeOffset> _cooldownUntil = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> _activeUntil = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -135,7 +136,7 @@ public class AgentSettingsService : IAgentSettingsService
     {
         lock (_syncLock)
         {
-            _findMeActiveUntil = DateTimeOffset.MinValue;
+            _activeUntil.Remove(LaptopKey);
             _wakeWordStatus = _wakeWordStatus with
             {
                 State = "Disabled",
@@ -145,41 +146,49 @@ public class AgentSettingsService : IAgentSettingsService
         }
     }
 
-    public bool IsFindMeActive
+    // ─── Find-Me: laptop (kompatibel dengan Phase 6B) ──────────────────────────
+
+    public bool IsFindMeActive => IsFindMeActiveFor(LaptopKey);
+
+    public bool TryAcquireFindMeCooldown(int durationSeconds, out int retryAfterSeconds)
+        => TryAcquireFindMeCooldown(LaptopKey, durationSeconds, out retryAfterSeconds);
+
+    public void MarkFindMeStopped() => MarkFindMeStopped(LaptopKey);
+
+    // ─── Find-Me: per perangkat (Phase 7) ──────────────────────────────────────
+
+    public bool IsFindMeActiveFor(string deviceKey)
     {
-        get
+        lock (_syncLock)
         {
-            lock (_syncLock)
-            {
-                return DateTimeOffset.UtcNow < _findMeActiveUntil;
-            }
+            return _activeUntil.TryGetValue(deviceKey, out var until) && DateTimeOffset.UtcNow < until;
         }
     }
 
-    public bool TryAcquireFindMeCooldown(int durationSeconds, out int retryAfterSeconds)
+    public bool TryAcquireFindMeCooldown(string deviceKey, int durationSeconds, out int retryAfterSeconds)
     {
         var now = DateTimeOffset.UtcNow;
         lock (_syncLock)
         {
-            if (now < _findMeCooldownUntil)
+            if (_cooldownUntil.TryGetValue(deviceKey, out var cooldownUntil) && now < cooldownUntil)
             {
-                retryAfterSeconds = Math.Max(1, (int)Math.Ceiling((_findMeCooldownUntil - now).TotalSeconds));
+                retryAfterSeconds = Math.Max(1, (int)Math.Ceiling((cooldownUntil - now).TotalSeconds));
                 return false;
             }
 
             var cooldownSec = Math.Max(FindMeCooldownSeconds, Math.Min(durationSeconds, 15));
-            _findMeCooldownUntil = now.AddSeconds(cooldownSec);
-            _findMeActiveUntil = now.AddSeconds(Math.Clamp(durationSeconds, 1, 30));
+            _cooldownUntil[deviceKey] = now.AddSeconds(cooldownSec);
+            _activeUntil[deviceKey] = now.AddSeconds(Math.Clamp(durationSeconds, 1, 30));
             retryAfterSeconds = 0;
             return true;
         }
     }
 
-    public void MarkFindMeStopped()
+    public void MarkFindMeStopped(string deviceKey)
     {
         lock (_syncLock)
         {
-            _findMeActiveUntil = DateTimeOffset.MinValue;
+            _activeUntil.Remove(deviceKey);
         }
     }
 

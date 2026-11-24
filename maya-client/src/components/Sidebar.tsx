@@ -10,6 +10,7 @@ import {
   BatteryCharging,
   LogOut,
   Sparkles,
+  Settings,
 } from 'lucide-react';
 import type { DeviceStatus } from '../types';
 
@@ -19,6 +20,7 @@ interface SidebarProps {
   deviceStatus: DeviceStatus | null;
   isSignalRConnected: boolean;
   onLogout: () => void;
+  onOpenServerSettings?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -27,6 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   deviceStatus,
   isSignalRConnected,
   onLogout,
+  onOpenServerSettings,
 }) => {
   const isOnline = deviceStatus?.isOnline ?? false;
 
@@ -200,13 +203,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        <button
-          onClick={onLogout}
-          title="Kunci / Logout"
-          className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 transition-colors"
-        >
-          <LogOut className="h-4 w-4" />
-        </button>
+        <div className="flex items-center space-x-1">
+          {onOpenServerSettings && (
+            <button
+              onClick={onOpenServerSettings}
+              title="Pengaturan Server URL"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 transition-colors"
+            >
+              <Settings className="h-4 w-4" />
+            </button>
+          )}
+          <button
+            onClick={onLogout}
+            title="Kunci / Logout"
+            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
       </div>
     </aside>
   );

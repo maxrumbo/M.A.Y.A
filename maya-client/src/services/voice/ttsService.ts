@@ -82,18 +82,64 @@ export class TtsService {
       if (matched) return matched;
     }
 
-    // Cari voice bahasa Indonesia
+    // Prioritas suara PEREMPUAN Indonesia (Gadis / Female / Google Bahasa Indonesia non-male)
+    const isMaleVoice = (v: SpeechSynthesisVoice) => {
+      const n = `${v.name} ${v.voiceURI}`.toLowerCase();
+      return (
+        n.includes('ardi') ||
+        n.includes('male') ||
+        n.includes('id-id-x-dfz') ||
+        n.includes('id-id-x-idd')
+      );
+    };
+
+    const isFemaleHint = (v: SpeechSynthesisVoice) => {
+      const n = `${v.name} ${v.voiceURI}`.toLowerCase();
+      return (
+        n.includes('gadis') ||
+        n.includes('female') ||
+        n.includes('perempuan') ||
+        n.includes('damayanti') ||
+        n.includes('id-id-x-idc') ||
+        n.includes('id-id-x-ide')
+      );
+    };
+
     const idVoices = this.getIndonesianVoices();
     if (idVoices.length > 0) {
-      // Prioritaskan Google / Natural voice jika ada
-      const natural = idVoices.find(
-        (v) => v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Online')
+      // 1. Microsoft Gadis / explicit female Indonesian voice
+      const gadis = idVoices.find((v) => v.name.toLowerCase().includes('gadis'));
+      if (gadis) return gadis;
+
+      const femaleId = idVoices.find((v) => isFemaleHint(v) && !isMaleVoice(v));
+      if (femaleId) return femaleId;
+
+      // 2. Google Bahasa Indonesia / Natural voice yang bukan suara laki-laki
+      const googleOrNatural = idVoices.find(
+        (v) =>
+          !isMaleVoice(v) &&
+          (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Online'))
       );
-      return natural || idVoices[0];
+      if (googleOrNatural) return googleOrNatural;
+
+      // 3. Voice id-ID apa pun yang bukan male
+      const nonMaleId = idVoices.find((v) => !isMaleVoice(v));
+      return nonMaleId || idVoices[0];
     }
 
-    // Fallback: Voice default sistem
-    return all.find((v) => v.default) || all[0];
+    // Fallback: suara perempuan default sistem bila voice id-ID tidak tersedia
+    const femaleFallback = all.find((v) => {
+      const n = v.name.toLowerCase();
+      return (
+        n.includes('gadis') ||
+        n.includes('female') ||
+        n.includes('zira') ||
+        n.includes('samantha') ||
+        n.includes('aria')
+      );
+    });
+
+    return femaleFallback || all.find((v) => v.default) || all[0];
   }
 
   public speak(

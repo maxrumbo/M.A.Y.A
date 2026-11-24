@@ -1,6 +1,13 @@
 import * as signalR from '@microsoft/signalr';
-import { API_BASE_URL, authStorage } from '../api/client';
-import type { DeviceStatus, WakeWordStatus, WakeWordHeardEvent } from '../types';
+import { authStorage, getApiBaseUrl } from '../api/client';
+import { getOrCreateMobileDeviceId, isNativeMobile } from './mobileNative';
+import type {
+  DeviceStatus,
+  WakeWordStatus,
+  WakeWordHeardEvent,
+  MobileStatus,
+  FindMeRequest,
+} from '../types';
 
 class SignalRService {
   private connection: signalR.HubConnection | null = null;
@@ -10,18 +17,37 @@ class SignalRService {
     connected: Array<(isConnected: boolean) => void>;
     wakeWordStatus: Array<(status: WakeWordStatus) => void>;
     wakeWordHeard: Array<(event: WakeWordHeardEvent) => void>;
+    mobileStatus: Array<(status: MobileStatus) => void>;
+    findMyPhone: Array<(req: FindMeRequest) => void>;
+    stopFindMyPhone: Array<() => void>;
   } = {
     statusChange: [],
     commandStatus: [],
     connected: [],
     wakeWordStatus: [],
     wakeWordHeard: [],
+    mobileStatus: [],
+    findMyPhone: [],
+    stopFindMyPhone: [],
   };
+
+  private async registerMobileIfNative(): Promise<void> {
+    if (!isNativeMobile()) return;
+    if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
+      return;
+    }
+
+    try {
+      await this.connection.invoke('RegisterMobileDevice', getOrCreateMobileDeviceId());
+    } catch {
+      // ignore transient reconnect errors
+    }
+  }
 
   public async start(): Promise<void> {
     if (this.connection) return;
 
-    const hubUrl = `${API_BASE_URL}/hubs/maya`;
+    const hubUrl = `${getApiBaseUrl()}/hubs/maya`;
 
     this.connection = new signalR.HubConnectionBuilder()
       .withUrl(hubUrl, {
@@ -90,27 +116,47 @@ class SignalRService {
       this.listeners.wakeWordHeard.forEach((cb) => cb({ phrase, timestamp }));
     });
 
+    // Phase 7: Mobile status & Find My Phone events
+    this.connection.on('MobileStatusChanged', (status: MobileStatus) => {
+      this.listeners.mobileStatus.forEach((cb) => cb(status));
+    });
+
+    this.connection.on('FindMyPhoneRequested', (req: FindMeRequest) => {
+      this.listeners.findMyPhone.forEach((cb) => cb(req || {}));
+    });
+
+    this.connection.on('StopFindMyPhone', () => {
+      this.listeners.stopFindMyPhone.forEach((cb) => cb());
+    });
+
     this.connection.onclose(() => {
       this.listeners.connected.forEach((cb) => cb(false));
     });
 
     this.connection.onreconnected(() => {
       this.listeners.connected.forEach((cb) => cb(true));
+      void this.registerMobileIfNative();
     });
 
     try {
       await this.connection.start();
       this.listeners.connected.forEach((cb) => cb(true));
-    } catch (err) {
+      await this.registerMobileIfNative();
+    } catch {
       this.listeners.connected.forEach((cb) => cb(false));
     }
   }
 
   public stop(): void {
     if (this.connection) {
-      this.connection.stop();
+      void this.connection.stop();
       this.connection = null;
     }
+  }
+
+  public async restart(): Promise<void> {
+    this.stop();
+    await this.start();
   }
 
   public onStatusChange(callback: (status: DeviceStatus) => void): () => void {
@@ -147,6 +193,27 @@ class SignalRService {
     this.listeners.wakeWordHeard.push(callback);
     return () => {
       this.listeners.wakeWordHeard = this.listeners.wakeWordHeard.filter((cb) => cb !== callback);
+    };
+  }
+
+  public onMobileStatusChange(callback: (status: MobileStatus) => void): () => void {
+    this.listeners.mobileStatus.push(callback);
+    return () => {
+      this.listeners.mobileStatus = this.listeners.mobileStatus.filter((cb) => cb !== callback);
+    };
+  }
+
+  public onFindMyPhoneRequested(callback: (req: FindMeRequest) => void): () => void {
+    this.listeners.findMyPhone.push(callback);
+    return () => {
+      this.listeners.findMyPhone = this.listeners.findMyPhone.filter((cb) => cb !== callback);
+    };
+  }
+
+  public onStopFindMyPhone(callback: () => void): () => void {
+    this.listeners.stopFindMyPhone.push(callback);
+    return () => {
+      this.listeners.stopFindMyPhone = this.listeners.stopFindMyPhone.filter((cb) => cb !== callback);
     };
   }
 }

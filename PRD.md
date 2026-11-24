@@ -771,7 +771,24 @@ Mengunci seluruh sistem dengan autentikasi perangkat (Biometrik/PIN), menghidupk
   * **Hardening `MayaHub`:** Koneksi client non-Agent tanpa JWT valid ditolak (`Context.Abort()`). CORS diperluas mencakup CGNAT/Tailscale (`100.64.0.0/10`).
   * `MobileDeviceService` + `MobileController` (`/api/mobile/status`, `POST /api/mobile/find-me`, `POST /api/mobile/find-me/stop`) dengan cooldown terpisah per perangkat (`laptop` vs `phone`) dan tool Gemini `find_my_device(device="phone")` aktif.
   * Plugin native Java `MayaNative` (`MayaNativePlugin.java` terdaftar di `MainActivity.java`): menyimpan volume `STREAM_ALARM` → naikkan ke maks → putar alarm `USAGE_ALARM` + getar berpola + TTS *"Aku di sini, Max!"* → **selalu mengembalikan volume alarm di blok `finally`**, dilengkapi overlay layar penuh tombol **STOP ALARM** di UI HP dan kartu **Find My Phone** di `LaptopControlView`.
-  * *Ditunda ke Phase 7B:* Android Foreground Service untuk menjaga koneksi SignalR saat layar mati lama.
+  * *Dilanjutkan di Phase 7B:* Native Biometric, Foreground Service layar mati, dan Responsive Mobile UI.
+
+---
+
+# 13.4 PHASE 7B: ANDROID NATIVE BIOMETRIC, FOREGROUND SERVICE & RESPONSIVE MOBILE UI
+
+* **Native Android Biometric Auth & Keystore (`MayaNativePlugin.java` + `androidx.biometric:biometric`):**
+  * `BiometricPrompt` (Sidik Jari / Face Unlock Android) + enkripsi Master PIN menggunakan kunci AES-256-GCM di `AndroidKeyStore`.
+  * Terintegrasi di `LockScreen.tsx` (Unlock sekali sentuh + opt-in simpan biometrik + **AbortController timeout 8 detik**, reset `loading` di `finally`, dan auto-clear PIN pada `401`) serta di `StepUpModal.tsx` (Konfirmasi biometrik satu tap untuk aksi `HIGH_RISK` yang tetap mengirim `X-Step-Up-Token` terikat `targetId`).
+* **Android Foreground Service (`MayaKeepAliveService.java`):**
+  * Foreground Service bertipe `dataSync` dengan notifikasi persisten rendah gangguan (*"M.A.Y.A. aktif di latar belakang"* + tombol *"Matikan"* langsung di notifikasi), izin `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `POST_NOTIFICATIONS`, `WAKE_LOCK`.
+  * Guard **Mode Hemat Baterai HP** (auto-stop bila baterai `< 20%` & tidak di-charge) + shortcut satu tap ke pengaturan *Optimasi Baterai* Android (`Unrestricted`).
+  * Toggle opt-in default OFF di `LaptopControlView.tsx` (khusus APK Android).
+* **Kestabilan Koneksi Mobile (`signalr.ts` & `App.tsx`):**
+  * Listener `visibilitychange`, `focus`, dan `online` langsung memanggil `signalRService.ensureConnected()` + `RegisterMobileDevice` saat layar HP menyala kembali tanpa menunggu backoff 30 detik.
+* **Responsive Mobile UI & Safe-Area (`maya-client`):**
+  * `viewport-fit=cover`, tinggi layout `100dvh`, dan CSS `env(safe-area-inset-top/bottom)`.
+  * Sidebar otomatis menjadi **slide-over drawer** di mobile (`< md`), dilengkapi **Mobile Top Bar** (menu drawer, status laptop, server gear) dan **Mobile Bottom Navigation Bar** 4 tab (`Chat`, `Vault`, `Memory`, `Control`).
 
 ---
 

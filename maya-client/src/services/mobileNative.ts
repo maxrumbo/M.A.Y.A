@@ -1,14 +1,58 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 
+export interface BiometricAvailability {
+  available: boolean;
+  hasSavedPin: boolean;
+  status: string;
+}
+
+export interface BiometricAuthResult {
+  authenticated: boolean;
+  pin?: string;
+}
+
+export interface KeepAliveStatus {
+  running: boolean;
+  batterySaverEnabled: boolean;
+  reason: string;
+  batteryPercent: number;
+  isCharging: boolean;
+  ignoringBatteryOptimizations: boolean;
+}
+
 interface MayaNativePluginInterface {
   startFindMe(options: { durationSeconds: number; message?: string }): Promise<{
     started: boolean;
     durationSeconds: number;
   }>;
   stopFindMe(): Promise<{ stopped: boolean }>;
+
+  // Phase 7B: Biometric + Android Keystore
+  checkBiometricAvailability(): Promise<BiometricAvailability>;
+  saveBiometricPin(options: { pin: string }): Promise<{ saved: boolean }>;
+  clearBiometricPin(): Promise<{ cleared: boolean }>;
+  authenticateBiometric(options?: {
+    title?: string;
+    subtitle?: string;
+    negativeText?: string;
+  }): Promise<BiometricAuthResult>;
+
+  // Phase 7B: Keep-Alive Foreground Service & Battery Optimization
+  getKeepAliveStatus(): Promise<KeepAliveStatus>;
+  startKeepAliveService(options?: {
+    batterySaverEnabled?: boolean;
+    batteryThreshold?: number;
+  }): Promise<{ started: boolean; running: boolean }>;
+  stopKeepAliveService(): Promise<{ stopped: boolean; running: boolean }>;
+  openBatteryOptimizationSettings(): Promise<{ opened: boolean }>;
+
   addListener(
     eventName: 'findMeStopped',
     listenerFunc: () => void
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'keepAliveStateChanged',
+    listenerFunc: (data: { running: boolean; reason: string }) => void
   ): Promise<PluginListenerHandle>;
 }
 
@@ -55,6 +99,82 @@ export async function onNativeFindMeStopped(
 ): Promise<() => void> {
   if (!isNativeMobile()) return () => {};
   const handle = await MayaNative.addListener('findMeStopped', callback);
+  return () => {
+    void handle.remove();
+  };
+}
+
+// ─── Phase 7B: Biometric Auth Helpers ────────────────────────────────────────
+
+export async function checkBiometricAvailability(): Promise<BiometricAvailability> {
+  if (!isNativeMobile()) {
+    return { available: false, hasSavedPin: false, status: 'web' };
+  }
+  try {
+    return await MayaNative.checkBiometricAvailability();
+  } catch {
+    return { available: false, hasSavedPin: false, status: 'error' };
+  }
+}
+
+export async function saveBiometricPin(pin: string): Promise<void> {
+  if (!isNativeMobile()) return;
+  await MayaNative.saveBiometricPin({ pin });
+}
+
+export async function clearBiometricPin(): Promise<void> {
+  if (!isNativeMobile()) return;
+  await MayaNative.clearBiometricPin();
+}
+
+export async function authenticateBiometric(
+  title = 'Verifikasi M.A.Y.A.',
+  subtitle = 'Gunakan Sidik Jari atau Face Unlock'
+): Promise<BiometricAuthResult> {
+  if (!isNativeMobile()) {
+    throw new Error('Biometrik native hanya tersedia di aplikasi Android.');
+  }
+  return await MayaNative.authenticateBiometric({
+    title,
+    subtitle,
+    negativeText: 'Gunakan PIN',
+  });
+}
+
+// ─── Phase 7B: Keep-Alive Foreground Service Helpers ─────────────────────────
+
+export async function getKeepAliveStatus(): Promise<KeepAliveStatus | null> {
+  if (!isNativeMobile()) return null;
+  try {
+    return await MayaNative.getKeepAliveStatus();
+  } catch {
+    return null;
+  }
+}
+
+export async function startKeepAliveService(
+  batterySaverEnabled = true,
+  batteryThreshold = 20
+): Promise<void> {
+  if (!isNativeMobile()) return;
+  await MayaNative.startKeepAliveService({ batterySaverEnabled, batteryThreshold });
+}
+
+export async function stopKeepAliveService(): Promise<void> {
+  if (!isNativeMobile()) return;
+  await MayaNative.stopKeepAliveService();
+}
+
+export async function openBatteryOptimizationSettings(): Promise<void> {
+  if (!isNativeMobile()) return;
+  await MayaNative.openBatteryOptimizationSettings();
+}
+
+export async function onKeepAliveStateChanged(
+  callback: (data: { running: boolean; reason: string }) => void
+): Promise<() => void> {
+  if (!isNativeMobile()) return () => {};
+  const handle = await MayaNative.addListener('keepAliveStateChanged', callback);
   return () => {
     void handle.remove();
   };

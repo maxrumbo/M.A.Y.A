@@ -58,7 +58,9 @@ async function apiRequest<T>(
     } catch {
       // ignore JSON parse error
     }
-    throw new Error(errorDetail);
+    const err = new Error(errorDetail) as Error & { status?: number };
+    err.status = response.status;
+    throw err;
   }
 
   if (response.status === 204) {
@@ -70,12 +72,13 @@ async function apiRequest<T>(
 
 export const api = {
   // ─── Auth ───
-  loginWithPin: async (pin: string) => {
+  loginWithPin: async (pin: string, signal?: AbortSignal) => {
     const res = await apiRequest<{ accessToken: string; expiresInSeconds: number }>(
       '/api/auth/login-pin',
       {
         method: 'POST',
         body: JSON.stringify({ pin }),
+        signal,
       }
     );
     authStorage.setToken(res.accessToken);
@@ -91,12 +94,13 @@ export const api = {
   getMe: () =>
     apiRequest<{ user: string; role: string; message: string }>('/api/auth/me'),
 
-  requestStepUp: (verificationToken: string, targetId: string) =>
+  requestStepUp: (verificationToken: string, targetId: string, signal?: AbortSignal) =>
     apiRequest<{ stepUpToken: string; expiresInSeconds: number; expiresAt: string }>(
       '/api/auth/step-up',
       {
         method: 'POST',
         body: JSON.stringify({ verificationToken, targetId }),
+        signal,
       }
     ),
 

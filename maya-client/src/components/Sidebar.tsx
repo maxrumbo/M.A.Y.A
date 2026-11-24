@@ -11,6 +11,7 @@ import {
   LogOut,
   Sparkles,
   Settings,
+  X,
 } from 'lucide-react';
 import type { DeviceStatus } from '../types';
 
@@ -21,6 +22,8 @@ interface SidebarProps {
   isSignalRConnected: boolean;
   onLogout: () => void;
   onOpenServerSettings?: () => void;
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -30,11 +33,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isSignalRConnected,
   onLogout,
   onOpenServerSettings,
+  mobileOpen = false,
+  onCloseMobile,
 }) => {
   const isOnline = deviceStatus?.isOnline ?? false;
 
-  return (
-    <aside className="w-64 border-r border-zinc-800/80 bg-zinc-950 flex flex-col h-full shrink-0 select-none">
+  const handleTabClick = (tab: 'chat' | 'vault' | 'memories' | 'controls') => {
+    onTabChange(tab);
+    onCloseMobile?.();
+  };
+
+  const sidebarContent = (
+    <aside className="w-64 border-r border-zinc-800/80 bg-zinc-950 flex flex-col h-full shrink-0 select-none safe-top safe-bottom">
       {/* Brand Header */}
       <div className="p-4 border-b border-zinc-800/80 flex items-center justify-between">
         <div className="flex items-center space-x-3">
@@ -48,18 +58,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </p>
           </div>
         </div>
-        <div
-          title={isSignalRConnected ? 'SignalR Bridge Connected' : 'SignalR Reconnecting...'}
-          className={`h-2 w-2 rounded-full ${
-            isSignalRConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
-          }`}
-        />
+        <div className="flex items-center space-x-2">
+          <div
+            title={isSignalRConnected ? 'SignalR Bridge Connected' : 'SignalR Reconnecting...'}
+            className={`h-2 w-2 rounded-full ${
+              isSignalRConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+            }`}
+          />
+          {onCloseMobile && (
+            <button
+              type="button"
+              onClick={onCloseMobile}
+              aria-label="Tutup Menu"
+              className="md:hidden p-1 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Navigation Tabs */}
-      <nav className="p-3 space-y-1 flex-1">
+      <nav className="p-3 space-y-1 flex-1 overflow-y-auto">
         <button
-          onClick={() => onTabChange('chat')}
+          onClick={() => handleTabClick('chat')}
           className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
             activeTab === 'chat'
               ? 'bg-zinc-900 text-indigo-300 border border-zinc-800 shadow-sm'
@@ -71,7 +93,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </button>
 
         <button
-          onClick={() => onTabChange('vault')}
+          onClick={() => handleTabClick('vault')}
           className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
             activeTab === 'vault'
               ? 'bg-zinc-900 text-indigo-300 border border-zinc-800 shadow-sm'
@@ -83,7 +105,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </button>
 
         <button
-          onClick={() => onTabChange('memories')}
+          onClick={() => handleTabClick('memories')}
           className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
             activeTab === 'memories'
               ? 'bg-zinc-900 text-indigo-300 border border-zinc-800 shadow-sm'
@@ -95,7 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </button>
 
         <button
-          onClick={() => onTabChange('controls')}
+          onClick={() => handleTabClick('controls')}
           className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
             activeTab === 'controls'
               ? 'bg-zinc-900 text-indigo-300 border border-zinc-800 shadow-sm'
@@ -112,7 +134,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex items-center justify-between mb-2.5">
           <div className="flex items-center space-x-2">
             <Laptop className="h-3.5 w-3.5 text-zinc-400" />
-            <span className="font-medium text-zinc-300">Maxwell's Laptop</span>
+            <span className="font-medium text-zinc-300">Maxwell&apos;s Laptop</span>
           </div>
           <span
             className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono ${
@@ -206,7 +228,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex items-center space-x-1">
           {onOpenServerSettings && (
             <button
-              onClick={onOpenServerSettings}
+              onClick={() => {
+                onCloseMobile?.();
+                onOpenServerSettings();
+              }}
               title="Pengaturan Server URL"
               className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 transition-colors"
             >
@@ -214,7 +239,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           )}
           <button
-            onClick={onLogout}
+            onClick={() => {
+              onCloseMobile?.();
+              onLogout();
+            }}
             title="Kunci / Logout"
             className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 transition-colors"
           >
@@ -223,5 +251,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
     </aside>
+  );
+
+  return (
+    <>
+      {/* Desktop Static Sidebar */}
+      <div className="hidden md:flex h-full shrink-0">{sidebarContent}</div>
+
+      {/* Mobile Slide-Over Drawer (Phase 7B) */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 flex md:hidden">
+          <div
+            onClick={onCloseMobile}
+            className="fixed inset-0 bg-black/65 backdrop-blur-xs transition-opacity"
+          />
+          <div className="relative z-50 h-full shadow-2xl">{sidebarContent}</div>
+        </div>
+      )}
+    </>
   );
 };

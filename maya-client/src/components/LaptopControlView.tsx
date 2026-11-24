@@ -23,9 +23,20 @@ import {
   BatteryCharging,
   ShieldCheck,
   Smartphone,
+  Shield,
+  ExternalLink,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { signalRService } from '../services/signalr';
+import {
+  isNativeMobile,
+  getKeepAliveStatus,
+  startKeepAliveService,
+  stopKeepAliveService,
+  openBatteryOptimizationSettings,
+  onKeepAliveStateChanged,
+  type KeepAliveStatus,
+} from '../services/mobileNative';
 import type { DeviceStatus, AgentSettings, WakeWordStatus, MobileStatus } from '../types';
 
 interface LaptopControlViewProps {
@@ -62,11 +73,15 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
     type: 'success' | 'error' | 'info';
     text: string;
   } | null>(null);
+  const [keepAlive, setKeepAlive] = useState<KeepAliveStatus | null>(null);
+  const [keepAliveBatterySaver, setKeepAliveBatterySaver] = useState<boolean>(true);
+  const [togglingKeepAlive, setTogglingKeepAlive] = useState<boolean>(false);
 
   const findMeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const phoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isOnline = deviceStatus?.isOnline ?? false;
   const isPhoneOnline = mobileStatus.onlineDevices > 0;
+  const nativeMobile = isNativeMobile();
 
   useEffect(() => {
     api
@@ -84,6 +99,32 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
       .catch(() => {});
 
     const unsubMobileStatus = signalRService.onMobileStatusChange(setMobileStatus);
+
+    let unsubKeepAlive: (() => void) | null = null;
+    if (isNativeMobile()) {
+      void getKeepAliveStatus().then((st) => {
+        if (st) {
+          setKeepAlive(st);
+          setKeepAliveBatterySaver(st.batterySaverEnabled);
+        }
+      });
+      void onKeepAliveStateChanged((ev) => {
+        setKeepAlive((prev) =>
+          prev
+            ? { ...prev, running: ev.running, reason: ev.reason }
+            : {
+                running: ev.running,
+                batterySaverEnabled: true,
+                reason: ev.reason,
+                batteryPercent: 100,
+                isCharging: false,
+                ignoringBatteryOptimizations: false,
+              }
+        );
+      }).then((fn) => {
+        unsubKeepAlive = fn;
+      });
+    }
 
     const unsubWakeStatus = signalRService.onWakeWordStatus((status) => {
       setWakeStatus((prev) => ({
@@ -106,6 +147,7 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
       unsubWakeStatus();
       unsubWakeHeard();
       unsubMobileStatus();
+      unsubKeepAlive?.();
       if (findMeTimerRef.current) {
         clearTimeout(findMeTimerRef.current);
       }
@@ -114,6 +156,27 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
       }
     };
   }, []);
+
+  const handleToggleKeepAlive = async (enable: boolean, batterySaverOverride?: boolean) => {
+    const saver = batterySaverOverride ?? keepAliveBatterySaver;
+    setTogglingKeepAlive(true);
+    try {
+      if (enable) {
+        await startKeepAliveService(saver, 20);
+      } else {
+        await stopKeepAliveService();
+      }
+      const fresh = await getKeepAliveStatus();
+      if (fresh) setKeepAlive(fresh);
+    } catch (err: any) {
+      setPhoneFeedback({
+        type: 'error',
+        text: err?.message || 'Gagal mengubah Mode Stand-By.',
+      });
+    } finally {
+      setTogglingKeepAlive(false);
+    }
+  };
 
   const handleFindMyPhone = async () => {
     if (!isPhoneOnline) {
@@ -343,7 +406,7 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
   return (
     <div className="flex-1 flex flex-col h-full bg-zinc-950 overflow-hidden">
       {/* Header */}
-      <header className="h-14 border-b border-zinc-800/80 px-6 flex items-center justify-between shrink-0 bg-zinc-950/80 backdrop-blur-md">
+      <header className="h-12 sm:h-14 border-b border-zinc-800/80 px-4 sm:px-6 flex items-center justify-between shrink-0 bg-zinc-950/80 backdrop-blur-md">
         <div className="flex items-center space-x-3">
           <Sliders className="h-5 w-5 text-indigo-400" />
           <h2 className="font-semibold text-sm text-zinc-100">Laptop Control Hub</h2>
@@ -360,7 +423,7 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
       </header>
 
       {/* Main Grid */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-5xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 max-w-5xl mx-auto w-full">
         {/* Phase 6B: Find-Me & On-Device Wake-Word */}
         <div>
           <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
@@ -586,6 +649,112 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Card 4 (Phase 7B — Khusus APK Android): Mode Stand-By Layar Mati */}
+            {nativeMobile && (
+              <div className="md:col-span-2 p-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 flex flex-col justify-between space-y-3">
+                <div className="flex items-start justify-between space-x-3">
+                  <div className="flex items-start space-x-3">
+                    <div className="p-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-indigo-400 shrink-0">
+                      <Shield className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-medium text-sm text-zinc-100">
+                        Mode Stand-By Layar Mati (Android Foreground Service)
+                      </h4>
+                      <p className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
+                        Menjaga koneksi SignalR &amp; Find My Phone tetap aktif saat layar HP mati dengan notifikasi persisten ringan.
+                      </p>
+                    </div>
+                  </div>
+
+                  <span
+                    className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full border text-[10px] font-mono shrink-0 ${
+                      keepAlive?.running
+                        ? 'bg-emerald-950/80 text-emerald-400 border-emerald-800/80'
+                        : 'bg-zinc-900 text-zinc-400 border-zinc-800'
+                    }`}
+                  >
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        keepAlive?.running ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'
+                      }`}
+                    />
+                    <span>{keepAlive?.running ? 'Aktif' : 'Nonaktif'}</span>
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800/80 cursor-pointer">
+                    <div className="pr-3">
+                      <div className="text-xs font-medium text-zinc-200">
+                        Aktifkan Mode Stand-By (Opt-in)
+                      </div>
+                      <div className="text-[10px] text-zinc-500 mt-0.5">
+                        {keepAlive?.reason || 'Nonaktif (opt-in).'}
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={keepAlive?.running ?? false}
+                      disabled={togglingKeepAlive}
+                      onChange={(e) => void handleToggleKeepAlive(e.target.checked)}
+                      className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-indigo-600 focus:ring-0 cursor-pointer shrink-0"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800/80 cursor-pointer">
+                    <div className="pr-3">
+                      <div className="text-xs font-medium text-zinc-200 flex items-center space-x-1.5">
+                        <BatteryCharging className="h-3.5 w-3.5 text-emerald-400" />
+                        <span>Hemat Baterai HP (Auto-stop &lt; 20%)</span>
+                      </div>
+                      <div className="text-[10px] text-zinc-500 mt-0.5">
+                        Baterai HP saat ini: {keepAlive?.batteryPercent ?? '—'}%
+                        {keepAlive?.isCharging ? ' (Charging)' : ''}
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={keepAliveBatterySaver}
+                      disabled={togglingKeepAlive}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setKeepAliveBatterySaver(checked);
+                        if (keepAlive?.running) {
+                          void handleToggleKeepAlive(true, checked);
+                        }
+                      }}
+                      className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-indigo-600 focus:ring-0 cursor-pointer shrink-0"
+                    />
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-zinc-800/70 gap-2">
+                  <span className="text-[10px] text-zinc-500">
+                    Optimasi Baterai:{' '}
+                    <span
+                      className={
+                        keepAlive?.ignoringBatteryOptimizations
+                          ? 'text-emerald-400 font-mono'
+                          : 'text-amber-400 font-mono'
+                      }
+                    >
+                      {keepAlive?.ignoringBatteryOptimizations ? 'Unrestricted' : 'Dibatasi OS'}
+                    </span>
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => void openBatteryOptimizationSettings()}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-zinc-800 bg-zinc-950 hover:bg-zinc-800 text-[11px] text-zinc-300 transition-colors"
+                  >
+                    <ExternalLink className="h-3 w-3 text-indigo-400" />
+                    <span>Atur Optimasi Baterai</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

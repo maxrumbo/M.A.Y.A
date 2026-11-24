@@ -159,6 +159,28 @@ class SignalRService {
     await this.start();
   }
 
+  /**
+   * Phase 7B: Dipanggil saat app Android / tab browser kembali aktif (visibilitychange / focus)
+   * untuk memastikan SignalR langsung tersambung ulang & HP terdaftar kembali tanpa menunggu backoff 30 detik.
+   */
+  public async ensureConnected(): Promise<void> {
+    if (!authStorage.hasToken()) return;
+
+    if (!this.connection) {
+      await this.start();
+      return;
+    }
+
+    if (this.connection.state === signalR.HubConnectionState.Disconnected) {
+      await this.restart();
+      return;
+    }
+
+    if (this.connection.state === signalR.HubConnectionState.Connected) {
+      await this.registerMobileIfNative();
+    }
+  }
+
   public onStatusChange(callback: (status: DeviceStatus) => void): () => void {
     this.listeners.statusChange.push(callback);
     return () => {

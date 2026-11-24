@@ -288,26 +288,26 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
   return (
     <div className="flex-1 flex flex-col h-full bg-zinc-950 overflow-hidden">
       {/* Top Header */}
-      <header className="h-14 border-b border-zinc-800/80 px-4 flex items-center justify-between shrink-0 bg-zinc-950/80 backdrop-blur-md z-10">
-        <div className="flex items-center space-x-3">
+      <header className="min-h-12 sm:h-14 border-b border-zinc-800/80 px-3 sm:px-4 py-2 flex items-center justify-between gap-2 shrink-0 bg-zinc-950/80 backdrop-blur-md z-10">
+        <div className="flex items-center space-x-2 min-w-0">
           {/* Mini Telemetry Pill */}
-          <div className="flex items-center space-x-2 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs font-mono">
+          <div className="flex items-center space-x-1.5 sm:space-x-2 px-2 sm:px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] sm:text-xs font-mono truncate">
             <span
-              className={`h-2 w-2 rounded-full ${
+              className={`h-2 w-2 rounded-full shrink-0 ${
                 isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-600'
               }`}
             />
             <span className="text-zinc-300 font-medium">
-              {isOnline ? 'Laptop Online' : 'Laptop Offline'}
+              {isOnline ? 'Online' : 'Offline'}
             </span>
             {isOnline && (
               <>
-                <span className="text-zinc-600">|</span>
-                <span className="text-zinc-400">
+                <span className="hidden sm:inline text-zinc-600">|</span>
+                <span className="hidden sm:inline text-zinc-400">
                   CPU {deviceStatus?.cpuUsagePercent?.toFixed(0) ?? '—'}%
                 </span>
-                <span className="text-zinc-600">|</span>
-                <span className="text-zinc-400">
+                <span className="hidden md:inline text-zinc-600">|</span>
+                <span className="hidden md:inline text-zinc-400">
                   RAM {deviceStatus?.ramUsagePercent?.toFixed(0) ?? '—'}%
                 </span>
                 <span className="text-zinc-600">|</span>
@@ -320,16 +320,16 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
         </div>
 
         {/* Header Action Controls */}
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
           {/* Sesi Baru Button */}
           <button
             onClick={handleNewChat}
             disabled={loading}
             title="Mulai Sesi Percakapan Baru"
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 text-xs transition-colors disabled:opacity-50"
+            className="flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 text-xs transition-colors disabled:opacity-50"
           >
             <PlusCircle className="h-3.5 w-3.5" />
-            <span>Sesi Baru</span>
+            <span className="hidden sm:inline">Sesi Baru</span>
           </button>
 
           {/* Proactive Snooze Controls */}
@@ -553,7 +553,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
       </div>
 
       {/* Input Area */}
-      <footer className="p-4 border-t border-zinc-800/80 bg-zinc-950 shrink-0">
+      <footer className="p-2.5 sm:p-4 border-t border-zinc-800/80 bg-zinc-950 shrink-0">
         {/* Phase 6A: Voice Waveform / Status Indicator */}
         <VoiceWaveIndicator
           state={voice.voiceState}

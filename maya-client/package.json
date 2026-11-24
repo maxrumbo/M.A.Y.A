@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:apk": "powershell -ExecutionPolicy Bypass -File ../scripts/build-apk.ps1"
   },
   "dependencies": {
     "@capacitor-community/speech-recognition": "^7.0.1",

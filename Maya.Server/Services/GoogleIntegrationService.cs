@@ -62,7 +62,7 @@ public class GoogleIntegrationService : IGoogleIntegrationService
 
         _clientId     = config["Google:ClientId"];
         _clientSecret = config["Google:ClientSecret"];
-        _callbackUrl  = config["Google:CallbackUrl"] ?? "http://localhost:5063/api/integrations/google/callback";
+        _callbackUrl  = config["Google:CallbackUrl"] ?? "http://localhost:5000/api/integrations/google/callback";
 
         if (!IsConfigured)
             _logger.LogWarning("GoogleIntegrationService: Google:ClientId atau Google:ClientSecret belum dikonfigurasi. " +

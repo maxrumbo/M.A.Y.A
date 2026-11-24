@@ -496,3 +496,9 @@ google-services.json
 *firebase-adminsdk*.json
 *-firebase-adminsdk-*.json
 client_secret*.json
+
+# Android APK releases & binaries (output builds disimpan lokal di releases/)
+!/releases/
+!/releases/README.md
+*.apk
+releases/*.apk

@@ -21,7 +21,7 @@ Write-Host "[OK] Build Maya.slnx sukses." -ForegroundColor Green
 Write-Host ""
 
 # 1. Jalankan Maya.Server (--no-build)
-Write-Host "[1/3] Menjalankan Maya.Server (http://0.0.0.0:5063)..." -ForegroundColor Yellow
+Write-Host "[1/3] Menjalankan Maya.Server (http://0.0.0.0:5000)..." -ForegroundColor Yellow
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "Write-Host '--- Maya.Server ---' -ForegroundColor Cyan; dotnet run --no-build --project Maya.Server --launch-profile http"
 
 # Tunggu 3 detik agar server mulai siap menerima koneksi
@@ -39,5 +39,5 @@ Write-Host ""
 Write-Host "Semua service M.A.Y.A. telah dijalankan di window terminal terpisah!" -ForegroundColor Green
 Write-Host "Buka di laptop:  http://localhost:5173" -ForegroundColor White
 Write-Host "Buka di HP LAN:  http://<IP-LAN-LAPTOP>:5173 (misal http://10.139.30.105:5173)" -ForegroundColor White
-Write-Host "Swagger API di:  http://localhost:5063/swagger" -ForegroundColor White
+Write-Host "Swagger API di:  http://localhost:5000/swagger" -ForegroundColor White
 Write-Host "==========================================================" -ForegroundColor Cyan

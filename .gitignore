@@ -486,8 +486,9 @@ $RECYCLE.BIN/
 # Vim temporary swap files
 *.swp
 
-# Phase 6B runtime agent settings JSON
+# Phase 6B runtime agent settings JSON & local static web copy
 Maya.Server/App_Data/
+Maya.Server/wwwroot/
 
 # Phase 8: kredensial Firebase / Google - JANGAN PERNAH commit
 google-services.json

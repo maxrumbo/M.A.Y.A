@@ -67,8 +67,9 @@ export const App: React.FC = () => {
     // Fetch initial device status
     refreshStatus();
 
-    // Periodic polling every 5s to guarantee fresh telemetry & online status
-    const pollInterval = setInterval(refreshStatus, 5000);
+    // Periodic fallback polling (30s) to keep telemetry fresh if WebSocket drops,
+    // avoiding aggressive 5s radio wakeups on mobile that cause CPU/modem heat
+    const pollInterval = setInterval(refreshStatus, 30000);
 
     // Start SignalR
     void signalRService.start();

@@ -19,6 +19,7 @@ const LOGIN_TIMEOUT_MS = 8000;
 
 export const LockScreen: React.FC<LockScreenProps> = ({ onUnlocked }) => {
   const [pin, setPin] = useState('');
+  const [setupFirstPin, setSetupFirstPin] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showServerSettings, setShowServerSettings] = useState(false);
@@ -63,6 +64,17 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlocked }) => {
     const timeoutId = setTimeout(() => controller.abort(), LOGIN_TIMEOUT_MS);
 
     try {
+      if (setupFirstPin !== null) {
+        if (pinToSubmit !== setupFirstPin) {
+          setSetupFirstPin(null);
+          setError('Konfirmasi PIN tidak cocok. Silakan ketik Master PIN baru dari awal.');
+          setPin('');
+          return;
+        }
+        await api.setupPin(pinToSubmit, pinToSubmit);
+        setSetupFirstPin(null);
+      }
+
       await api.loginWithPin(pinToSubmit, controller.signal);
 
       // Simpan PIN terenkripsi di Android Keystore bila pengguna mengaktifkan biometrik
@@ -73,18 +85,22 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlocked }) => {
 
       onUnlocked();
     } catch (err: any) {
+      const msg = String(err?.message || '');
       if (err?.name === 'AbortError') {
         setError(
           'Timeout (8 detik): Maya.Server tidak merespons. Cek alamat Server (ikon gear) atau koneksi jaringan.'
         );
+      } else if (err?.status === 401 && msg.toLowerCase().includes('belum dikonfigurasi')) {
+        setSetupFirstPin(pinToSubmit);
+        setError(null);
       } else if (err?.status === 401) {
-        setError(err.message || 'PIN salah. Akses ditolak.');
+        setError(msg || 'PIN salah. Akses ditolak.');
         if (fromBiometric) {
           await clearBiometricPin().catch(() => {});
           setHasSavedBiometricPin(false);
         }
       } else {
-        setError(err?.message || 'Gagal menghubungi server.');
+        setError(msg || 'Gagal menghubungi server.');
       }
       // Auto-clear PIN agar pengguna tidak stuck dan bisa langsung input ulang
       setPin('');
@@ -182,6 +198,13 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlocked }) => {
             />
           ))}
         </div>
+
+        {/* Setup Master PIN Prompt (muncul otomatis saat DB baru belum memiliki PIN) */}
+        {setupFirstPin !== null && !error && (
+          <div className="mb-4 w-64 rounded-lg bg-indigo-950/50 border border-indigo-800/70 px-3 py-2 text-xs text-indigo-200 text-center">
+            PIN belum terdaftar di database. Ketik ulang PIN yang sama sekali lagi untuk mengunci Master PIN baru.
+          </div>
+        )}
 
         {/* Error Message */}
         {error && (

@@ -812,6 +812,13 @@ Mengunci seluruh sistem dengan autentikasi perangkat (Biometrik/PIN), menghidupk
   * UI: kartu **Integrasi** di tab *Control* (`IntegrationsPanel.tsx`): Hubungkan/Putuskan Google, status FCM, Daftarkan HP, Tes Push Notification.
 * **Env var production:** `ConnectionStrings__DefaultConnection`, `Gemini__ApiKey`, `Maya__JwtSecret`, `Maya__AgentSecret`, `Maya__VaultMasterKey` (harus sama dengan lokal), opsional `Firebase__ServiceAccountJsonBase64`, `Google__ClientId`, `Google__ClientSecret`, `Google__CallbackUrl`, `Maya__AllowedOrigins`.
 * **Catatan:** OAuth consent screen mode *Testing* membuat refresh token Google kedaluwarsa tiap **7 hari** (hubungkan ulang), kecuali aplikasi dipublikasikan. Render plan *free* tidur ±15 menit tanpa trafik → notifikasi proaktif butuh plan always-on.
+* **Pilar 4 — Local Database Deployment & Resilience Hardening (Sesi 24 Nov 2026):**
+  * **Database Fallback:** Karena koneksi jaringan ke AWS Sydney Supabase mengalami timeout, database PostgreSQL 16 dialihkan ke container Docker lokal (`maya-postgres`, port `5433`, volume `maya_pgdata`) dan EF Core migration `InitialCreate` sukses dieksekusi.
+  * **Cloudflare Tunnel:** `Maya.Server` berjalan pada port 5000 dan diekspos secara aman ke internet via Cloudflare Tunnel (`trycloudflare.com`) sehingga APK mobile dapat terhubung dari mana saja tanpa membuka port router.
+  * **Google OAuth & FCM Active:** Kredensial Google OAuth diinjeksikan ke `user-secrets`, Firebase FCM Admin SDK sukses terinisialisasi dan notifikasi tes terkirim ke device Android Maxwell (`maxwell-phone-n6b9so`).
+  * **Daemon Resilience (Infinite Reconnect):** `Maya.Agent` ditambahkan `InfiniteRetryPolicy` (jeda bertahap hingga maks 10 detik) sehingga tidak akan mati permanen saat server direstart atau koneksi Wi-Fi terputus.
+  * **Thermal & Battery Optimization:** Fallback polling status laptop di aplikasi mobile disesuaikan dari 5 detik ke 30 detik untuk menghindari *radio tail state* pada jaringan seluler 4G/LTE yang menyebabkan modem HP panas.
+  * **LockScreen Setup Guide:** `LockScreen.tsx` mendukung inisialisasi Master PIN pertama kali secara mulus jika database baru di-reset.
 
 ---
 

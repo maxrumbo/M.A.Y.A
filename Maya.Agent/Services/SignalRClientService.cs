@@ -60,14 +60,7 @@ public class SignalRClientService : IAsyncDisposable
                     options.Headers["X-Agent-Secret"] = agentSecret;
                 }
             })
-            .WithAutomaticReconnect(new[]
-            {
-                TimeSpan.Zero,
-                TimeSpan.FromSeconds(2),
-                TimeSpan.FromSeconds(5),
-                TimeSpan.FromSeconds(10),
-                TimeSpan.FromSeconds(30)
-            })
+            .WithAutomaticReconnect(new InfiniteRetryPolicy())
             .Build();
 
         // Daftarkan handler perintah dari server
@@ -247,5 +240,19 @@ public class SignalRClientService : IAsyncDisposable
             await _hubConnection.DisposeAsync();
         }
         _heartbeatCts?.Dispose();
+    }
+}
+
+public sealed class InfiniteRetryPolicy : IRetryPolicy
+{
+    public TimeSpan? NextRetryDelay(RetryContext retryContext)
+    {
+        return retryContext.PreviousRetryCount switch
+        {
+            0 => TimeSpan.Zero,
+            1 => TimeSpan.FromSeconds(2),
+            2 => TimeSpan.FromSeconds(5),
+            _ => TimeSpan.FromSeconds(10)
+        };
     }
 }

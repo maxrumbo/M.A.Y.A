@@ -2,7 +2,7 @@
 # M.A.Y.A. Mobile APK Versioned Builder
 # ==============================================================================
 # Script ini membangun APK Android, men-sinkronisasi Capacitor, dan menyimpan
-# hasil render APK ke folder 'releases/' dengan penomoran versi otomatis (tanpa overwrite/cutover)
+# hasil build ke folder 'releases/' dengan format seragam maya-v{N}.apk (non-cutover)
 # ==============================================================================
 
 param(
@@ -26,37 +26,27 @@ if (-not (Test-Path $releasesDir)) {
     New-Item -ItemType Directory -Path $releasesDir -Force | Out-Null
 }
 
-# 1. Baca versi dari package.json
-$pkgJsonPath = Join-Path $clientDir "package.json"
-$appVersion = "1.0.0"
-if (Test-Path $pkgJsonPath) {
-    $pkg = Get-Content $pkgJsonPath -Raw | ConvertFrom-Json
-    if ($pkg.version) { $appVersion = $pkg.version }
-}
-
-# 2. Hitung nomor build berikutnya berdasarkan riwayat di folder releases/
-$pattern = "maya-v$appVersion-b([0-9]+).*\.apk"
-$existingBuilds = Get-ChildItem -Path $releasesDir -Filter "maya-v$appVersion-b*.apk" -ErrorAction SilentlyContinue
-$maxBuildNum = 0
+# 1. Hitung nomor versi berikutnya berdasarkan file maya-v{N}.apk di folder releases/
+$pattern = "^maya-v([0-9]+)\.apk$"
+$existingBuilds = Get-ChildItem -Path $releasesDir -Filter "maya-v*.apk" -ErrorAction SilentlyContinue
+$maxVersionNum = 0
 
 foreach ($file in $existingBuilds) {
     if ($file.Name -match $pattern) {
         $num = [int]$matches[1]
-        if ($num -gt $maxBuildNum) { $maxBuildNum = $num }
+        if ($num -gt $maxVersionNum) { $maxVersionNum = $num }
     }
 }
 
-$nextBuildNum = $maxBuildNum + 1
-$timestamp = Get-Date -Format "yyyyMMdd-HHmm"
-$versionedFileName = "maya-v${appVersion}-b${nextBuildNum}-${BuildType}.apk"
-$latestFileName = "maya-latest-${BuildType}.apk"
+$nextVersionNum = $maxVersionNum + 1
+$versionedFileName = "maya-v${nextVersionNum}.apk"
 
-Write-Host "Target Versi : v$appVersion" -ForegroundColor Yellow
-Write-Host "Build Number : #$nextBuildNum" -ForegroundColor Yellow
+Write-Host "Target Versi : v$nextVersionNum" -ForegroundColor Yellow
+Write-Host "Build Type   : $BuildType" -ForegroundColor Yellow
 Write-Host "Output File  : releases/$versionedFileName" -ForegroundColor Yellow
 Write-Host ""
 
-# 3. Build Web Client (Vite)
+# 2. Build Web Client (Vite)
 Write-Host "[1/4] Membangun bundle web frontend (npm run build)..." -ForegroundColor Cyan
 Set-Location $clientDir
 npm run build
@@ -66,7 +56,7 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# 4. Sinkronisasi Capacitor Android
+# 3. Sinkronisasi Capacitor Android
 Write-Host ""
 Write-Host "[2/4] Sinkronisasi aset ke project Android (cap sync)..." -ForegroundColor Cyan
 npx cap sync android
@@ -76,7 +66,7 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# 5. Build APK via Gradle
+# 4. Build APK via Gradle
 Write-Host ""
 Write-Host "[3/4] Mengompilasi APK via Gradle ($BuildType)..." -ForegroundColor Cyan
 Set-Location $androidDir
@@ -92,7 +82,7 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# 6. Cari hasil APK Gradle (prioritaskan app-$BuildType.apk atau file APK terbaru)
+# 5. Cari hasil APK Gradle (prioritaskan app-$BuildType.apk atau file APK terbaru)
 $apkOutputDir = Join-Path $androidDir "app\build\outputs\apk\$BuildType"
 $preferredApk = Join-Path $apkOutputDir "app-$BuildType.apk"
 
@@ -112,14 +102,11 @@ if (-not $sourceApk) {
     exit 1
 }
 
-# 7. Salin ke folder releases (Versi Arsip + Latest Pointer)
+# 6. Salin ke folder releases sebagai maya-v{N}.apk
 Write-Host ""
 Write-Host "[4/4] Mengarsipkan APK ke folder releases/..." -ForegroundColor Cyan
 $destVersioned = Join-Path $releasesDir $versionedFileName
-$destLatest = Join-Path $releasesDir $latestFileName
-
 Copy-Item -Path $sourceApk -Destination $destVersioned -Force
-Copy-Item -Path $sourceApk -Destination $destLatest -Force
 
 Set-Location $repoRoot
 
@@ -130,15 +117,16 @@ Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host "  BUILD APK SUKSES!                                       " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "  File Versi  : $destVersioned" -ForegroundColor White
-Write-Host "  File Latest : $destLatest" -ForegroundColor White
+Write-Host "  Output File : $destVersioned" -ForegroundColor White
 Write-Host "  Ukuran      : $apkSizeMB MB ($($apkInfo.Length) bytes)" -ForegroundColor White
 Write-Host "  Waktu       : $(Get-Date -Format 'dd-MM-yyyy HH:mm:ss')" -ForegroundColor White
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Riwayat build yang tersimpan di releases/:" -ForegroundColor Yellow
-Get-ChildItem -Path $releasesDir -Filter "*.apk" | ForEach-Object {
-    $mb = [math]::Round($_.Length / 1MB, 2)
-    Write-Host " - $($_.Name) ($mb MB) - $($_.LastWriteTime.ToString('yyyy-MM-dd HH:mm'))" -ForegroundColor Gray
-}
+Get-ChildItem -Path $releasesDir -Filter "maya-v*.apk" |
+    Sort-Object { if ($_.Name -match '^maya-v([0-9]+)\.apk$') { [int]$matches[1] } else { 0 } } |
+    ForEach-Object {
+        $mb = [math]::Round($_.Length / 1MB, 2)
+        Write-Host " - $($_.Name) ($mb MB) - $($_.LastWriteTime.ToString('yyyy-MM-dd HH:mm'))" -ForegroundColor Gray
+    }
 Write-Host ""

@@ -56,22 +56,22 @@ flowchart TD
 
 ## Pusat Rilis APK Android (Tanpa Cutover)
 
-Setiap proses build aplikasi Android menghasilkan file APK yang diarsipkan secara rapi di dalam direktori **[`releases/`](releases/)**. Sistem menggunakan penomoran versi berurutan sehingga hasil kompilasi sebelumnya tidak akan tertimpa atau hilang.
+Setiap proses build aplikasi Android menghasilkan file APK yang diarsipkan secara seragam di dalam direktori **[`releases/`](releases/)** dengan format `maya-v{N}.apk`. Sistem menggunakan penomoran versi berurutan sehingga hasil kompilasi sebelumnya tidak akan tertimpa.
 
 ```mermaid
 flowchart LR
-    Kompilasi["1. Jalankan Build APK"] --> Versi["2. Cek Versi & Nomor Build"]
-    Versi --> Arsip["3. Simpan ke releases/maya-vX.X-bX.apk"]
-    Arsip --> Pointer["4. Salin ke maya-latest-debug.apk"]
-    Pointer --> HP["5. Siap Dipasang di HP"]
+    Kompilasi["1. Jalankan Build APK"] --> Versi["2. Hitung Nomor Versi Berikutnya"]
+    Versi --> Arsip["3. Simpan ke releases/maya-vN.apk"]
+    Arsip --> HP["4. Siap Dipasang di HP"]
 ```
 
 ### Daftar File Rilis
 
 | File APK | Keterangan | Lokasi File |
 | :--- | :--- | :--- |
-| **`maya-latest-debug.apk`** | Rujukan build paling baru (disarankan untuk instalasi) | [`releases/maya-latest-debug.apk`](releases/maya-latest-debug.apk) |
-| **`maya-v1.0.0-b1-debug.apk`** | Arsip build versi 1.0.0 nomor rilis 1 | [`releases/maya-v1.0.0-b1-debug.apk`](releases/maya-v1.0.0-b1-debug.apk) |
+| **`maya-v3.apk`** | Versi terbaru (UI solid, SVG voice, logo & splash loader) | [`releases/maya-v3.apk`](releases/maya-v3.apk) |
+| **`maya-v2.apk`** | Versi 2 (perombakan dual theme awal) | [`releases/maya-v2.apk`](releases/maya-v2.apk) |
+| **`maya-v1.apk`** | Versi 1 (rilis awal FCM & Google OAuth) | [`releases/maya-v1.apk`](releases/maya-v1.apk) |
 
 ### Cara Membangun APK Versi Baru
 

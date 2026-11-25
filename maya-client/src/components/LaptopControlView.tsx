@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Sliders,
+  LayoutDashboard,
   Laptop,
   Code2,
   Globe,
@@ -25,10 +25,14 @@ import {
   Smartphone,
   Shield,
   ExternalLink,
+  CheckCircle2,
+  AlertCircle,
+  ChevronDown,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { signalRService } from '../services/signalr';
 import { IntegrationsPanel } from './IntegrationsPanel';
+import { CircularGauge } from './ui/CircularGauge';
 import {
   isNativeMobile,
   getKeepAliveStatus,
@@ -47,8 +51,14 @@ interface LaptopControlViewProps {
 
 export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
   deviceStatus,
+  onActionTriggered,
 }) => {
   const [executing, setExecuting] = useState<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
+  const [actionFeedback, setActionFeedback] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
   const [findMeActive, setFindMeActive] = useState<boolean>(false);
   const [findMeFeedback, setFindMeFeedback] = useState<{
     type: 'success' | 'error' | 'info';
@@ -80,9 +90,18 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
 
   const findMeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const phoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isOnline = deviceStatus?.isOnline ?? false;
   const isPhoneOnline = mobileStatus.onlineDevices > 0;
   const nativeMobile = isNativeMobile();
+
+  const showToast = (type: 'success' | 'error' | 'info', text: string) => {
+    setActionFeedback({ type, text });
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = setTimeout(() => {
+      setActionFeedback(null);
+    }, 4500);
+  };
 
   useEffect(() => {
     api
@@ -149,12 +168,9 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
       unsubWakeHeard();
       unsubMobileStatus();
       unsubKeepAlive?.();
-      if (findMeTimerRef.current) {
-        clearTimeout(findMeTimerRef.current);
-      }
-      if (phoneTimerRef.current) {
-        clearTimeout(phoneTimerRef.current);
-      }
+      if (findMeTimerRef.current) clearTimeout(findMeTimerRef.current);
+      if (phoneTimerRef.current) clearTimeout(phoneTimerRef.current);
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
     };
   }, []);
 
@@ -311,39 +327,23 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
       case 'Active':
         return {
           label: 'Aktif',
-          cls: 'bg-emerald-950/80 text-emerald-400 border-emerald-800/80',
-          dot: 'bg-emerald-400 animate-pulse',
+          cls: 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/80',
         };
       case 'PausedBattery':
         return {
           label: 'Dijeda (Baterai)',
-          cls: 'bg-amber-950/80 text-amber-300 border-amber-800/80',
-          dot: 'bg-amber-400',
+          cls: 'bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/80',
         };
       case 'Unsupported':
         return {
           label: 'Tidak Didukung',
-          cls: 'bg-red-950/80 text-red-400 border-red-800/80',
-          dot: 'bg-red-400',
+          cls: 'bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-800/80',
         };
       default:
         return {
           label: 'Nonaktif',
-          cls: 'bg-zinc-900 text-zinc-400 border-zinc-800',
-          dot: 'bg-zinc-500',
+          cls: 'bg-zinc-100 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800',
         };
-    }
-  };
-
-  const formatShortTime = (iso?: string | null) => {
-    if (!iso) return '';
-    try {
-      return new Date(iso).toLocaleTimeString('id-ID', {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return '';
     }
   };
 
@@ -351,16 +351,16 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
 
   const triggerApp = async (appName: string, label: string) => {
     if (!isOnline) {
-      alert('Laptop Maxwell sedang offline.');
+      showToast('error', 'Laptop Maxwell sedang offline.');
       return;
     }
 
     setExecuting(label);
     try {
       await api.sendMessage(`Maya, buka aplikasi ${appName}`);
-      alert(`Permintaan membuka ${label} telah dikirim ke laptop.`);
+      showToast('success', `Permintaan membuka ${label} telah dikirim ke laptop.`);
     } catch (err: any) {
-      alert(`Gagal: ${err.message}`);
+      showToast('error', `Gagal membuka ${label}: ${err.message}`);
     } finally {
       setExecuting(null);
     }
@@ -368,15 +368,16 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
 
   const triggerMedia = async (action: string, label: string) => {
     if (!isOnline) {
-      alert('Laptop Maxwell sedang offline.');
+      showToast('error', 'Laptop Maxwell sedang offline.');
       return;
     }
 
     setExecuting(label);
     try {
       await api.sendMessage(`Maya, kontrol media: ${action}`);
+      showToast('success', `Kontrol media '${label}' berhasil dikirim.`);
     } catch (err: any) {
-      alert(`Gagal: ${err.message}`);
+      showToast('error', `Gagal mengirim kontrol media: ${err.message}`);
     } finally {
       setExecuting(null);
     }
@@ -384,519 +385,409 @@ export const LaptopControlView: React.FC<LaptopControlViewProps> = ({
 
   const triggerPower = async (action: string, label: string) => {
     if (!isOnline) {
-      alert('Laptop Maxwell sedang offline.');
+      showToast('error', 'Laptop Maxwell sedang offline.');
       return;
     }
 
     if (action !== 'lock_screen') {
-      if (!confirm(`Aksi '${label}' berisiko tinggi. Buka chat untuk melakukan konfirmasi Step-Up?`))
+      if (!confirm(`Aksi '${label}' berisiko tinggi. Lanjutkan ke Obrolan untuk konfirmasi?`)) {
         return;
+      }
     }
 
     setExecuting(label);
     try {
       await api.sendMessage(`Maya, lakukan kontrol daya: ${action}`);
-      alert(`Permintaan '${label}' dikirim ke chat untuk konfirmasi.`);
+      showToast('info', `Permintaan '${label}' dikirim ke Obrolan.`);
+      if (action !== 'lock_screen') {
+        onActionTriggered();
+      }
     } catch (err: any) {
-      alert(`Gagal: ${err.message}`);
+      showToast('error', `Gagal: ${err.message}`);
     } finally {
       setExecuting(null);
     }
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-zinc-950 overflow-hidden">
-      {/* Header */}
-      <header className="h-12 sm:h-14 border-b border-zinc-800/80 px-4 sm:px-6 flex items-center justify-between shrink-0 bg-zinc-950/80 backdrop-blur-md">
-        <div className="flex items-center space-x-3">
-          <Sliders className="h-5 w-5 text-indigo-400" />
-          <h2 className="font-semibold text-sm text-zinc-100">Laptop Control Hub</h2>
-          <span
-            className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${
-              isOnline
-                ? 'bg-emerald-950 text-emerald-400 border border-emerald-900'
-                : 'bg-zinc-900 text-zinc-500 border border-zinc-800'
-            }`}
-          >
-            {isOnline ? 'Daemon Online' : 'Daemon Offline'}
-          </span>
+    <div className="flex-1 flex flex-col h-full bg-[#F8F9FA] dark:bg-[#0F1014] overflow-hidden transition-colors">
+      {/* Clean Header */}
+      <header className="h-12 sm:h-14 border-b border-zinc-200/80 dark:border-zinc-800/80 px-4 sm:px-6 flex items-center justify-between shrink-0 bg-white/80 dark:bg-[#14151A]/90 backdrop-blur-md">
+        <div className="flex items-center space-x-2.5">
+          <LayoutDashboard className="h-4 w-4 text-zinc-700 dark:text-zinc-300" />
+          <h2 className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">Dashboard</h2>
         </div>
+
+        <span
+          className={`text-[11px] font-mono ${
+            isOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-500'
+          }`}
+        >
+          {isOnline ? 'Laptop Online' : 'Laptop Offline'}
+        </span>
       </header>
 
-      {/* Main Grid */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 max-w-5xl mx-auto w-full">
-        {/* Phase 6B: Find-Me & On-Device Wake-Word */}
+      {/* Main Content */}
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 max-w-4xl mx-auto w-full">
+        {actionFeedback && (
+          <div
+            className={`px-4 py-3 rounded-2xl border text-xs flex items-center space-x-2.5 ${
+              actionFeedback.type === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800/70 text-emerald-700 dark:text-emerald-300'
+                : actionFeedback.type === 'error'
+                ? 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800/70 text-rose-700 dark:text-rose-300'
+                : 'bg-zinc-100 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300'
+            }`}
+          >
+            {actionFeedback.type === 'error' ? (
+              <AlertCircle className="h-4 w-4 shrink-0" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+            )}
+            <span className="font-medium">{actionFeedback.text}</span>
+          </div>
+        )}
+
+        {/* Section 1: 3 Solid Circular Telemetry Rings */}
         <div>
-          <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
-            Mode &ldquo;Find-Me&rdquo; &amp; Wake-Word Listener
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Card 1: Find My Laptop */}
-            <div className="p-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 flex flex-col justify-between space-y-4">
-              <div className="flex items-start justify-between space-x-3">
-                <div className="flex items-start space-x-3">
-                  <div className="p-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-indigo-400 shrink-0">
-                    <Radio className={`h-4 w-4 ${findMeActive ? 'animate-ping' : ''}`} />
-                  </div>
-                  <div>
-                    <h4 className="font-medium text-sm text-zinc-100">Find My Laptop</h4>
-                    <p className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
-                      Bunyikan ping 3 nada &amp; suara &ldquo;Aku di sini, Max!&rdquo; selama 10 detik.
-                      Otomatis unmute sementara lalu mengembalikan volume semula.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {findMeFeedback && (
-                <div
-                  className={`px-3 py-2 rounded-xl border text-[11px] ${
-                    findMeFeedback.type === 'success'
-                      ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
-                      : findMeFeedback.type === 'error'
-                      ? 'bg-red-950/40 border-red-800/60 text-red-300'
-                      : 'bg-zinc-950 border-zinc-800 text-zinc-300'
-                  }`}
-                >
-                  {findMeFeedback.text}
-                </div>
-              )}
-
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={handleFindMyLaptop}
-                  disabled={!isOnline || !!executing}
-                  title={!isOnline ? 'Laptop sedang offline' : 'Bunyikan alarm Find-Me di laptop'}
-                  className="flex-1 flex items-center justify-center space-x-2 px-3.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors disabled:opacity-40 disabled:pointer-events-none"
-                >
-                  <Radio className="h-3.5 w-3.5" />
-                  <span>{findMeActive ? 'Sedang Berbunyi...' : 'Find My Laptop (Ping)'}</span>
-                </button>
-
-                {findMeActive && (
-                  <button
-                    onClick={handleStopFindMe}
-                    disabled={!isOnline || !!executing}
-                    title="Hentikan alarm Find-Me sekarang"
-                    className="flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-red-600/80 hover:bg-red-500 text-white text-xs font-medium transition-colors disabled:opacity-40"
-                  >
-                    <Square className="h-3.5 w-3.5 fill-white" />
-                    <span>Stop</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Card 2: Wake-Word Listener & Battery Saver */}
-            <div className="p-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 flex flex-col justify-between space-y-3.5">
-              <div className="flex items-start justify-between space-x-2">
-                <div className="flex items-center space-x-2.5">
-                  <div className="p-2 rounded-xl bg-zinc-950 border border-zinc-800 text-indigo-400">
-                    <Ear className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h4 className="font-medium text-sm text-zinc-100">Wake-Word Listener</h4>
-                    <span className="text-[10px] font-mono text-zinc-500">
-                      {wakeStatus.engine || 'WindowsSpeech'}
-                    </span>
-                  </div>
-                </div>
-
-                <span
-                  className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full border text-[10px] font-mono shrink-0 ${wakeBadge.cls}`}
-                >
-                  <span className={`h-1.5 w-1.5 rounded-full ${wakeBadge.dot}`} />
-                  <span>{wakeBadge.label}</span>
-                </span>
-              </div>
-
-              {/* Toggles */}
-              <div className="space-y-2.5">
-                <label className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800/80 cursor-pointer">
-                  <div className="pr-3">
-                    <div className="text-xs font-medium text-zinc-200">
-                      Aktifkan Wake-Word (&ldquo;Hey Maya&rdquo;)
-                    </div>
-                    <div className="text-[10px] text-zinc-500 flex items-center space-x-1 mt-0.5">
-                      <ShieldCheck className="h-3 w-3 text-zinc-500 shrink-0" />
-                      <span>Diproses 100% lokal di Windows, tidak direkam ke server.</span>
-                    </div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={wakeSettings.wakeWordEnabled}
-                    disabled={savingWake}
-                    onChange={(e) =>
-                      handleUpdateWakeSettings({ wakeWordEnabled: e.target.checked })
-                    }
-                    className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-indigo-600 focus:ring-0 cursor-pointer shrink-0"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800/80 cursor-pointer">
-                  <div className="pr-3">
-                    <div className="text-xs font-medium text-zinc-200 flex items-center space-x-1.5">
-                      <BatteryCharging className="h-3.5 w-3.5 text-emerald-400" />
-                      <span>Mode Hemat Baterai</span>
-                    </div>
-                    <div className="text-[10px] text-zinc-500 mt-0.5">
-                      Auto-pause bila baterai &lt; {wakeSettings.batteryThresholdPercent}% &amp; tidak di-charge.
-                    </div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={wakeSettings.batterySaverEnabled}
-                    disabled={savingWake}
-                    onChange={(e) =>
-                      handleUpdateWakeSettings({ batterySaverEnabled: e.target.checked })
-                    }
-                    className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-indigo-600 focus:ring-0 cursor-pointer shrink-0"
-                  />
-                </label>
-              </div>
-
-              {/* Status Reason & Last Heard */}
-              <div className="text-[11px] text-zinc-400 flex flex-col space-y-1 pt-1 border-t border-zinc-800/70">
-                {wakeStatus.reason && wakeStatus.state !== 'Active' && (
-                  <p className="text-zinc-500 truncate" title={wakeStatus.reason}>
-                    {wakeStatus.reason}
-                  </p>
-                )}
-                {wakeStatus.lastHeardPhrase && (
-                  <p className="text-zinc-300 font-mono text-[10px]">
-                    Terakhir terdengar: &ldquo;{wakeStatus.lastHeardPhrase}&rdquo;
-                    {wakeStatus.lastHeardAt ? ` • ${formatShortTime(wakeStatus.lastHeardAt)}` : ''}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Card 3 (Phase 7): Find My Phone */}
-            <div className="md:col-span-2 p-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 flex flex-col justify-between space-y-3">
-              <div className="flex items-start justify-between space-x-3">
-                <div className="flex items-start space-x-3">
-                  <div className="p-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-indigo-400 shrink-0">
-                    <Smartphone
-                      className={`h-4 w-4 ${mobileStatus.isFindMeActive ? 'animate-bounce' : ''}`}
-                    />
-                  </div>
-                  <div>
-                    <h4 className="font-medium text-sm text-zinc-100">Find My Phone (HP Android)</h4>
-                    <p className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
-                      Kirim ping alarm, getar, dan suara &ldquo;Aku di sini, Max!&rdquo; ke HP yang sedang membuka aplikasi M.A.Y.A.
-                    </p>
-                  </div>
-                </div>
-
-                <span
-                  className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full border text-[10px] font-mono shrink-0 ${
-                    isPhoneOnline
-                      ? 'bg-emerald-950/80 text-emerald-400 border-emerald-800/80'
-                      : 'bg-zinc-900 text-zinc-500 border-zinc-800'
-                  }`}
-                >
-                  <span
-                    className={`h-1.5 w-1.5 rounded-full ${
-                      isPhoneOnline ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'
-                    }`}
-                  />
-                  <span>
-                    {isPhoneOnline ? `${mobileStatus.onlineDevices} HP Online` : 'HP Offline'}
-                  </span>
-                </span>
-              </div>
-
-              {phoneFeedback && (
-                <div
-                  className={`px-3 py-2 rounded-xl border text-[11px] ${
-                    phoneFeedback.type === 'success'
-                      ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
-                      : phoneFeedback.type === 'error'
-                      ? 'bg-red-950/40 border-red-800/60 text-red-300'
-                      : 'bg-zinc-950 border-zinc-800 text-zinc-300'
-                  }`}
-                >
-                  {phoneFeedback.text}
-                </div>
-              )}
-
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={handleFindMyPhone}
-                  disabled={!isPhoneOnline || !!executing}
-                  title={
-                    !isPhoneOnline
-                      ? 'HP belum terhubung. Buka aplikasi M.A.Y.A. di HP.'
-                      : 'Bunyikan alarm Find My Phone di HP'
-                  }
-                  className="flex-1 flex items-center justify-center space-x-2 px-3.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors disabled:opacity-40 disabled:pointer-events-none"
-                >
-                  <Smartphone className="h-3.5 w-3.5" />
-                  <span>
-                    {mobileStatus.isFindMeActive ? 'Ping HP Terkirim...' : 'Find My Phone (Ping)'}
-                  </span>
-                </button>
-
-                {mobileStatus.isFindMeActive && (
-                  <button
-                    onClick={handleStopFindMyPhone}
-                    disabled={!!executing}
-                    title="Hentikan alarm Find My Phone"
-                    className="flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-red-600/80 hover:bg-red-500 text-white text-xs font-medium transition-colors disabled:opacity-40"
-                  >
-                    <Square className="h-3.5 w-3.5 fill-white" />
-                    <span>Stop</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Card 5 (Phase 8): Integrasi Google OAuth & Push Notification FCM */}
-        <IntegrationsPanel />
-
-        {/* Card 4 (Phase 7B — Khusus APK Android): Mode Stand-By Layar Mati */}
-            {nativeMobile && (
-              <div className="md:col-span-2 p-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 flex flex-col justify-between space-y-3">
-                <div className="flex items-start justify-between space-x-3">
-                  <div className="flex items-start space-x-3">
-                    <div className="p-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-indigo-400 shrink-0">
-                      <Shield className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <h4 className="font-medium text-sm text-zinc-100">
-                        Mode Stand-By Layar Mati (Android Foreground Service)
-                      </h4>
-                      <p className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
-                        Menjaga koneksi SignalR &amp; Find My Phone tetap aktif saat layar HP mati dengan notifikasi persisten ringan.
-                      </p>
-                    </div>
-                  </div>
-
-                  <span
-                    className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full border text-[10px] font-mono shrink-0 ${
-                      keepAlive?.running
-                        ? 'bg-emerald-950/80 text-emerald-400 border-emerald-800/80'
-                        : 'bg-zinc-900 text-zinc-400 border-zinc-800'
-                    }`}
-                  >
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${
-                        keepAlive?.running ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'
-                      }`}
-                    />
-                    <span>{keepAlive?.running ? 'Aktif' : 'Nonaktif'}</span>
-                  </span>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800/80 cursor-pointer">
-                    <div className="pr-3">
-                      <div className="text-xs font-medium text-zinc-200">
-                        Aktifkan Mode Stand-By (Opt-in)
-                      </div>
-                      <div className="text-[10px] text-zinc-500 mt-0.5">
-                        {keepAlive?.reason || 'Nonaktif (opt-in).'}
-                      </div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={keepAlive?.running ?? false}
-                      disabled={togglingKeepAlive}
-                      onChange={(e) => void handleToggleKeepAlive(e.target.checked)}
-                      className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-indigo-600 focus:ring-0 cursor-pointer shrink-0"
-                    />
-                  </label>
-
-                  <label className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800/80 cursor-pointer">
-                    <div className="pr-3">
-                      <div className="text-xs font-medium text-zinc-200 flex items-center space-x-1.5">
-                        <BatteryCharging className="h-3.5 w-3.5 text-emerald-400" />
-                        <span>Hemat Baterai HP (Auto-stop &lt; 20%)</span>
-                      </div>
-                      <div className="text-[10px] text-zinc-500 mt-0.5">
-                        Baterai HP saat ini: {keepAlive?.batteryPercent ?? '—'}%
-                        {keepAlive?.isCharging ? ' (Charging)' : ''}
-                      </div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={keepAliveBatterySaver}
-                      disabled={togglingKeepAlive}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setKeepAliveBatterySaver(checked);
-                        if (keepAlive?.running) {
-                          void handleToggleKeepAlive(true, checked);
-                        }
-                      }}
-                      className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-indigo-600 focus:ring-0 cursor-pointer shrink-0"
-                    />
-                  </label>
-                </div>
-
-                <div className="flex items-center justify-between pt-1 border-t border-zinc-800/70 gap-2">
-                  <span className="text-[10px] text-zinc-500">
-                    Optimasi Baterai:{' '}
-                    <span
-                      className={
-                        keepAlive?.ignoringBatteryOptimizations
-                          ? 'text-emerald-400 font-mono'
-                          : 'text-amber-400 font-mono'
-                      }
-                    >
-                      {keepAlive?.ignoringBatteryOptimizations ? 'Unrestricted' : 'Dibatasi OS'}
-                    </span>
-                  </span>
-
-                  <button
-                    type="button"
-                    onClick={() => void openBatteryOptimizationSettings()}
-                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-zinc-800 bg-zinc-950 hover:bg-zinc-800 text-[11px] text-zinc-300 transition-colors"
-                  >
-                    <ExternalLink className="h-3 w-3 text-indigo-400" />
-                    <span>Atur Optimasi Baterai</span>
-                  </button>
-                </div>
-              </div>
+          <div className="flex items-center justify-between mb-2.5">
+            <h3 className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+              Telemetri Perangkat
+            </h3>
+            {executing && (
+              <span className="inline-flex items-center space-x-1.5 text-[11px] font-mono text-indigo-600 dark:text-indigo-400">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>{executing}...</span>
+              </span>
             )}
           </div>
-        </div>
-
-        {/* Section 1: Allowlist Workspace Apps */}
-        <div>
-          <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
-            Aplikasi Kerja & Ngoding (Allowlist)
-          </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { id: 'vscode', name: 'VS Code', icon: Code2, desc: 'Editor utama' },
-              { id: 'antigravity', name: 'Antigravity', icon: Laptop, desc: 'AI Coding Environment' },
-              { id: 'brave', name: 'Brave Browser', icon: Globe, desc: 'Web Browser' },
-              { id: 'chrome', name: 'Google Chrome', icon: Globe, desc: 'Web Browser' },
-              { id: 'terminal', name: 'Terminal / PowerShell', icon: Terminal, desc: 'Windows Terminal' },
-              { id: 'notepad', name: 'Notepad', icon: FileText, desc: 'Quick Notes' },
-              { id: 'spotify', name: 'Spotify', icon: Music, desc: 'Audio & Music' },
-              { id: 'explorer', name: 'File Explorer', icon: Folder, desc: 'Windows Explorer' },
-            ].map((app) => (
-              <button
-                key={app.id}
-                onClick={() => triggerApp(app.id, app.name)}
-                disabled={!isOnline || !!executing}
-                className="flex flex-col items-start p-3.5 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 hover:bg-zinc-800/70 hover:border-zinc-700 transition-all text-left group disabled:opacity-40"
-              >
-                <div className="p-2 rounded-xl bg-zinc-950 border border-zinc-800 text-indigo-400 group-hover:text-indigo-300 transition-colors mb-2">
-                  <app.icon className="h-4 w-4" />
-                </div>
-                <span className="font-medium text-xs text-zinc-200">{app.name}</span>
-                <span className="text-[10px] text-zinc-500 mt-0.5">{app.desc}</span>
-              </button>
-            ))}
+          <div className="grid grid-cols-3 gap-3">
+            <CircularGauge
+              label="CPU"
+              value={deviceStatus?.cpuUsagePercent}
+              strokeColor="stroke-zinc-900 dark:stroke-zinc-100"
+              subtitle={isOnline ? 'Prosesor' : 'Offline'}
+              offline={!isOnline}
+            />
+            <CircularGauge
+              label="RAM"
+              value={deviceStatus?.ramUsagePercent}
+              strokeColor="stroke-indigo-600 dark:stroke-indigo-400"
+              subtitle={isOnline ? 'Memori' : 'Offline'}
+              offline={!isOnline}
+            />
+            <CircularGauge
+              label="Baterai"
+              value={deviceStatus?.batteryPercent}
+              strokeColor={
+                (deviceStatus?.batteryPercent ?? 100) > 20
+                  ? 'stroke-emerald-600 dark:stroke-emerald-500'
+                  : 'stroke-rose-600 dark:stroke-rose-500'
+              }
+              subtitle={isOnline ? 'Daya PC' : 'Offline'}
+              offline={!isOnline}
+            />
           </div>
         </div>
 
-        {/* Section 2: Audio & Media Controls */}
-        <div>
-          <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
-            Kontrol Audio & Media
-          </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* Section 2: Compact Kontrol Cepat Card */}
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#17191F] p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+              Kontrol Cepat
+            </h3>
+            <span className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400">
+              {isPhoneOnline ? `${mobileStatus.onlineDevices} HP terhubung` : 'HP offline'}
+            </span>
+          </div>
+
+          {/* 4-Button Media Icon Row */}
+          <div className="grid grid-cols-4 gap-2">
             {[
-              { id: 'play_pause', name: 'Play / Pause', icon: Play, desc: 'Toggle Pemutaran' },
-              { id: 'volume_up', name: 'Volume +', icon: Volume2, desc: 'Naikkan Suara' },
-              { id: 'volume_down', name: 'Volume -', icon: Volume1, desc: 'Turunkan Suara' },
-              { id: 'mute', name: 'Mute Audio', icon: VolumeX, desc: 'Senyapkan Suara' },
+              { id: 'play_pause', name: 'Play / Pause', icon: Play },
+              { id: 'volume_down', name: 'Vol -', icon: Volume1 },
+              { id: 'volume_up', name: 'Vol +', icon: Volume2 },
+              { id: 'mute', name: 'Mute', icon: VolumeX },
             ].map((med) => (
               <button
                 key={med.id}
-                onClick={() => triggerMedia(med.id, med.name)}
+                type="button"
+                onClick={() => void triggerMedia(med.id, med.name)}
                 disabled={!isOnline || !!executing}
-                className="flex items-center space-x-3 p-3.5 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 hover:bg-zinc-800/70 hover:border-zinc-700 transition-all text-left disabled:opacity-40"
+                className="flex flex-col items-center justify-center py-2.5 px-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/70 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 transition-colors disabled:opacity-40 cursor-pointer"
               >
-                <div className="p-2 rounded-xl bg-zinc-950 border border-zinc-800 text-purple-400">
-                  <med.icon className="h-4 w-4" />
-                </div>
-                <div>
-                  <p className="font-medium text-xs text-zinc-200">{med.name}</p>
-                  <p className="text-[10px] text-zinc-500">{med.desc}</p>
-                </div>
+                <med.icon className="h-4 w-4 mb-1" />
+                <span className="text-[10px] font-medium truncate max-w-full">{med.name}</span>
               </button>
             ))}
           </div>
+
+          {/* 2 Clean Find-Device Action Buttons */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="flex items-center space-x-2">
+              <button
+                type="button"
+                onClick={() => void handleFindMyLaptop()}
+                disabled={!isOnline || !!executing}
+                className="flex-1 flex items-center justify-center space-x-2 px-3.5 py-2.5 rounded-xl bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-white text-white dark:text-zinc-950 text-xs font-medium transition-colors disabled:opacity-40 cursor-pointer"
+              >
+                <Radio className={`h-3.5 w-3.5 ${findMeActive ? 'animate-ping' : ''}`} />
+                <span>{findMeActive ? 'Laptop Berbunyi...' : 'Find Laptop'}</span>
+              </button>
+              {findMeActive && (
+                <button
+                  type="button"
+                  onClick={() => void handleStopFindMe()}
+                  disabled={!isOnline || !!executing}
+                  className="px-3 py-2.5 rounded-xl bg-rose-600 text-white text-xs font-medium cursor-pointer"
+                >
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <button
+                type="button"
+                onClick={() => void handleFindMyPhone()}
+                disabled={!isPhoneOnline || !!executing}
+                className="flex-1 flex items-center justify-center space-x-2 px-3.5 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-100 text-xs font-medium transition-colors disabled:opacity-40 cursor-pointer"
+              >
+                <Smartphone
+                  className={`h-3.5 w-3.5 ${mobileStatus.isFindMeActive ? 'animate-bounce' : ''}`}
+                />
+                <span>{mobileStatus.isFindMeActive ? 'Ping Terkirim...' : 'Find Phone'}</span>
+              </button>
+              {mobileStatus.isFindMeActive && (
+                <button
+                  type="button"
+                  onClick={() => void handleStopFindMyPhone()}
+                  disabled={!!executing}
+                  className="px-3 py-2.5 rounded-xl bg-rose-600 text-white text-xs font-medium cursor-pointer"
+                >
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {(findMeFeedback || phoneFeedback) && (
+            <div className="text-[11px] text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2">
+              {findMeFeedback?.text || phoneFeedback?.text}
+            </div>
+          )}
         </div>
 
-        {/* Section 3: Power Controls (High Risk) */}
-        <div>
-          <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3 flex items-center space-x-1.5">
-            <span>Kontrol Daya Laptop</span>
-            <span className="text-[10px] text-amber-500/80 font-normal">
-              (Memerlukan Konfirmasi Step-Up)
-            </span>
-          </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <button
-              onClick={() => triggerPower('lock_screen', 'Lock Workstation')}
-              disabled={!isOnline || !!executing}
-              className="flex items-center space-x-3 p-3.5 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 hover:bg-zinc-800/70 hover:border-zinc-700 transition-all text-left disabled:opacity-40"
-            >
-              <div className="p-2 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-400">
-                <Lock className="h-4 w-4" />
-              </div>
-              <div>
-                <p className="font-medium text-xs text-zinc-200">Kunci Layar</p>
-                <p className="text-[10px] text-zinc-500">Lock Workstation</p>
-              </div>
-            </button>
+        {/* Section 3: Integrations */}
+        <IntegrationsPanel />
 
-            <button
-              onClick={() => triggerPower('sleep', 'Sleep Mode')}
-              disabled={!isOnline || !!executing}
-              className="flex items-center space-x-3 p-3.5 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 hover:bg-zinc-800/70 hover:border-zinc-700 transition-all text-left disabled:opacity-40"
-            >
-              <div className="p-2 rounded-xl bg-zinc-950 border border-zinc-800 text-blue-400">
-                <Moon className="h-4 w-4" />
-              </div>
-              <div>
-                <p className="font-medium text-xs text-zinc-200">Mode Tidur</p>
-                <p className="text-[10px] text-zinc-500">Suspend State</p>
-              </div>
-            </button>
+        {/* Section 4: Collapsible Kontrol Lanjutan (Collapsed by Default) */}
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#17191F] overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((prev) => !prev)}
+            className="w-full px-4 py-3.5 flex items-center justify-between text-left hover:bg-zinc-50 dark:hover:bg-zinc-900/60 transition-colors cursor-pointer"
+          >
+            <div>
+              <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                Kontrol Lanjutan
+              </p>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                Wake-Word, Mode Stand-By, Peluncur Aplikasi, dan Kontrol Daya
+              </p>
+            </div>
+            <ChevronDown
+              className={`h-4 w-4 text-zinc-400 transition-transform duration-200 ${
+                showAdvanced ? 'rotate-180' : ''
+              }`}
+            />
+          </button>
 
-            <button
-              onClick={() => triggerPower('restart', 'Restart Laptop')}
-              disabled={!isOnline || !!executing}
-              className="flex items-center space-x-3 p-3.5 rounded-2xl border border-amber-900/30 bg-amber-950/20 hover:bg-amber-950/40 hover:border-amber-700/60 transition-all text-left disabled:opacity-40"
-            >
-              <div className="p-2 rounded-xl bg-zinc-950 border border-amber-800/50 text-amber-400">
-                <RotateCcw className="h-4 w-4" />
-              </div>
-              <div>
-                <p className="font-medium text-xs text-amber-300">Restart</p>
-                <p className="text-[10px] text-amber-500/70">Reboot Sistem</p>
-              </div>
-            </button>
+          {showAdvanced && (
+            <div className="p-4 pt-2 border-t border-zinc-200/80 dark:border-zinc-800/80 space-y-5">
+              {/* Wake-Word & Stand-By */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-3.5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/50 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Ear className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                      <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                        Wake-Word Listener
+                      </span>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full border text-[10px] font-mono ${wakeBadge.cls}`}
+                    >
+                      {wakeBadge.label}
+                    </span>
+                  </div>
 
-            <button
-              onClick={() => triggerPower('shutdown', 'Shutdown Laptop')}
-              disabled={!isOnline || !!executing}
-              className="flex items-center space-x-3 p-3.5 rounded-2xl border border-red-900/30 bg-red-950/20 hover:bg-red-950/40 hover:border-red-700/60 transition-all text-left disabled:opacity-40"
-            >
-              <div className="p-2 rounded-xl bg-zinc-950 border border-red-800/50 text-red-400">
-                <Power className="h-4 w-4" />
+                  <label className="flex items-center justify-between text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                    <span className="flex items-center space-x-1.5">
+                      <ShieldCheck className="h-3.5 w-3.5 text-zinc-400" />
+                      <span>Aktifkan &ldquo;Hey Maya&rdquo;</span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={wakeSettings.wakeWordEnabled}
+                      disabled={savingWake}
+                      onChange={(e) =>
+                        void handleUpdateWakeSettings({ wakeWordEnabled: e.target.checked })
+                      }
+                      className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 text-indigo-600 focus:ring-0 cursor-pointer"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                    <span className="flex items-center space-x-1.5">
+                      <BatteryCharging className="h-3.5 w-3.5 text-emerald-500" />
+                      <span>Hemat Baterai (&lt;{wakeSettings.batteryThresholdPercent}%)</span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={wakeSettings.batterySaverEnabled}
+                      disabled={savingWake}
+                      onChange={(e) =>
+                        void handleUpdateWakeSettings({ batterySaverEnabled: e.target.checked })
+                      }
+                      className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 text-indigo-600 focus:ring-0 cursor-pointer"
+                    />
+                  </label>
+                </div>
+
+                {nativeMobile && (
+                  <div className="p-3.5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/50 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <Shield className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                        <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                          Mode Stand-By Layar Mati
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-zinc-500">
+                        {keepAlive?.running ? 'Aktif' : 'Nonaktif'}
+                      </span>
+                    </div>
+
+                    <label className="flex items-center justify-between text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                      <span>Aktifkan Mode Stand-By</span>
+                      <input
+                        type="checkbox"
+                        checked={keepAlive?.running ?? false}
+                        disabled={togglingKeepAlive}
+                        onChange={(e) => void handleToggleKeepAlive(e.target.checked)}
+                        className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 text-indigo-600 focus:ring-0 cursor-pointer"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                      <span>Auto-stop &lt; 20%</span>
+                      <input
+                        type="checkbox"
+                        checked={keepAliveBatterySaver}
+                        disabled={togglingKeepAlive}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setKeepAliveBatterySaver(checked);
+                          if (keepAlive?.running) {
+                            void handleToggleKeepAlive(true, checked);
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 text-indigo-600 focus:ring-0 cursor-pointer"
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => void openBatteryOptimizationSettings()}
+                      className="inline-flex items-center space-x-1.5 text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      <span>Atur Optimasi Baterai OS</span>
+                    </button>
+                  </div>
+                )}
               </div>
+
+              {/* Allowlist Apps */}
               <div>
-                <p className="font-medium text-xs text-red-300">Shutdown</p>
-                <p className="text-[10px] text-red-500/70">Matikan Daya</p>
+                <h4 className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-2">
+                  Aplikasi Laptop
+                </h4>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {[
+                    { id: 'vscode', name: 'VS Code', icon: Code2 },
+                    { id: 'antigravity', name: 'Antigravity', icon: Laptop },
+                    { id: 'brave', name: 'Brave', icon: Globe },
+                    { id: 'chrome', name: 'Chrome', icon: Globe },
+                    { id: 'terminal', name: 'Terminal', icon: Terminal },
+                    { id: 'notepad', name: 'Notepad', icon: FileText },
+                    { id: 'spotify', name: 'Spotify', icon: Music },
+                    { id: 'explorer', name: 'Explorer', icon: Folder },
+                  ].map((app) => (
+                    <button
+                      key={app.id}
+                      type="button"
+                      onClick={() => void triggerApp(app.id, app.name)}
+                      disabled={!isOnline || !!executing}
+                      className="flex items-center space-x-2.5 p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-left disabled:opacity-40 cursor-pointer"
+                    >
+                      <app.icon className="h-4 w-4 text-zinc-600 dark:text-zinc-400 shrink-0" />
+                      <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate">
+                        {app.name}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </button>
-          </div>
+
+              {/* Power Controls */}
+              <div>
+                <h4 className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-2">
+                  Kontrol Daya Laptop (Step-Up)
+                </h4>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => void triggerPower('lock_screen', 'Lock Workstation')}
+                    disabled={!isOnline || !!executing}
+                    className="flex items-center space-x-2 p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs font-medium text-zinc-800 dark:text-zinc-200 disabled:opacity-40 cursor-pointer"
+                  >
+                    <Lock className="h-4 w-4 text-zinc-500" />
+                    <span>Kunci Layar</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void triggerPower('sleep', 'Sleep Mode')}
+                    disabled={!isOnline || !!executing}
+                    className="flex items-center space-x-2 p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs font-medium text-zinc-800 dark:text-zinc-200 disabled:opacity-40 cursor-pointer"
+                  >
+                    <Moon className="h-4 w-4 text-indigo-500" />
+                    <span>Sleep</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void triggerPower('restart', 'Restart Laptop')}
+                    disabled={!isOnline || !!executing}
+                    className="flex items-center space-x-2 p-2.5 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/70 dark:bg-amber-950/20 text-xs font-medium text-amber-800 dark:text-amber-300 disabled:opacity-40 cursor-pointer"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    <span>Restart</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void triggerPower('shutdown', 'Shutdown Laptop')}
+                    disabled={!isOnline || !!executing}
+                    className="flex items-center space-x-2 p-2.5 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50/70 dark:bg-rose-950/20 text-xs font-medium text-rose-700 dark:text-rose-300 disabled:opacity-40 cursor-pointer"
+                  >
+                    <Power className="h-4 w-4" />
+                    <span>Shutdown</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-
-        {executing && (
-          <div className="flex items-center space-x-2 text-xs text-indigo-400 pt-2 font-mono">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span>Memproses perintah {executing}...</span>
-          </div>
-        )}
       </div>
     </div>
   );

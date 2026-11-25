@@ -1,12 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Menu,
+  Mic,
   MessageSquare,
-  KeyRound,
-  Brain,
-  Sliders,
-  Settings,
-  Sparkles,
+  LayoutDashboard,
+  User,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { authStorage, api } from './api/client';
 import { signalRService } from './services/signalr';
@@ -17,24 +16,199 @@ import {
   stopNativeFindMe,
   onNativeFindMeStopped,
 } from './services/mobileNative';
-import type { DeviceStatus } from './types';
+import { useTheme } from './context/ThemeContext';
+import { MayaSessionProvider, useMayaSession } from './context/MayaSessionContext';
+import type { AppTab, DeviceStatus } from './types';
+import { SplashLoader } from './components/SplashLoader';
+import { MayaLogo } from './components/ui/MayaLogo';
 import { LockScreen } from './components/LockScreen';
 import { Sidebar } from './components/Sidebar';
+import { HomeView } from './components/HomeView';
 import { ChatWorkspace } from './components/ChatWorkspace';
-import { VaultView } from './components/VaultView';
-import { MemoryView } from './components/MemoryView';
 import { LaptopControlView } from './components/LaptopControlView';
+import { PersonalView } from './components/PersonalView';
 import { ServerSettingsModal } from './components/ServerSettingsModal';
 import { FindMyPhoneOverlay } from './components/FindMyPhoneOverlay';
+import { VoiceSettingsModal } from './components/voice/VoiceSettingsModal';
+import { StepUpModal } from './components/StepUpModal';
+
+interface AuthenticatedShellProps {
+  deviceStatus: DeviceStatus | null;
+  isSignalRConnected: boolean;
+  onLogout: () => void;
+  onOpenServerSettings: () => void;
+}
+
+const AuthenticatedShell: React.FC<AuthenticatedShellProps> = ({
+  deviceStatus,
+  isSignalRConnected,
+  onLogout,
+  onOpenServerSettings,
+}) => {
+  const { isDark, toggleTheme } = useTheme();
+  const {
+    showVoiceSettings,
+    setShowVoiceSettings,
+    voice,
+    stepUpTarget,
+    closeStepUp,
+    handleStepUpSuccess,
+  } = useMayaSession();
+
+  const [activeTab, setActiveTab] = useState<AppTab>('home');
+  const [autoFocusChatInput, setAutoFocusChatInput] = useState<boolean>(false);
+
+  const handleNavigate = useCallback((tab: AppTab, focusInput = false) => {
+    setActiveTab(tab);
+    if (tab === 'chat' && focusInput) {
+      setAutoFocusChatInput(true);
+    }
+  }, []);
+
+  const isLaptopOnline = deviceStatus?.isOnline ?? false;
+
+  const mobileNavItems: Array<{ id: AppTab; label: string; icon: React.FC<{ className?: string }> }> = [
+    { id: 'home', label: 'Bicara', icon: Mic },
+    { id: 'chat', label: 'Obrolan', icon: MessageSquare },
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'personal', label: 'Personal', icon: User },
+  ];
+
+  return (
+    <div className="flex flex-col md:flex-row h-[100dvh] w-screen overflow-hidden bg-[#F8F9FA] dark:bg-[#0F1014] font-sans text-zinc-900 dark:text-zinc-100 transition-colors">
+      {/* Minimal Mobile Top Bar */}
+      <div className="md:hidden shrink-0 border-b border-zinc-200/80 dark:border-zinc-800/80 bg-[#F8F9FA]/95 dark:bg-[#0F1014]/95 backdrop-blur-md safe-top z-20">
+        <div className="h-12 px-4 flex items-center justify-between">
+          <div className="flex items-center space-x-2.5">
+            <MayaLogo size={24} framed />
+            <span className="font-semibold text-sm tracking-wide">M.A.Y.A.</span>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <span
+              title={isLaptopOnline ? 'Laptop Online' : 'Laptop Offline'}
+              className={`h-2 w-2 rounded-full ${
+                isLaptopOnline ? 'bg-emerald-500' : 'bg-zinc-400 dark:bg-zinc-600'
+              }`}
+            />
+
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label="Ganti Tema"
+              className="p-1.5 rounded-xl text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200/60 dark:hover:bg-zinc-800 transition-colors"
+            >
+              {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Desktop Static Sidebar */}
+      <Sidebar
+        activeTab={activeTab}
+        onTabChange={(tab) => handleNavigate(tab)}
+        deviceStatus={deviceStatus}
+        isSignalRConnected={isSignalRConnected}
+        onLogout={onLogout}
+        onOpenServerSettings={onOpenServerSettings}
+      />
+
+      {/* Main Workspace */}
+      <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        {activeTab === 'home' && (
+          <HomeView deviceStatus={deviceStatus} onNavigate={handleNavigate} />
+        )}
+        {activeTab === 'chat' && (
+          <ChatWorkspace
+            deviceStatus={deviceStatus}
+            autoFocusInput={autoFocusChatInput}
+            onInputFocused={() => setAutoFocusChatInput(false)}
+          />
+        )}
+        {activeTab === 'dashboard' && (
+          <LaptopControlView
+            deviceStatus={deviceStatus}
+            onActionTriggered={() => handleNavigate('chat')}
+          />
+        )}
+        {activeTab === 'personal' && (
+          <PersonalView
+            isSignalRConnected={isSignalRConnected}
+            onOpenServerSettings={onOpenServerSettings}
+            onLogout={onLogout}
+          />
+        )}
+      </main>
+
+      {/* Minimal Mobile Bottom Navigation Bar */}
+      <nav className="md:hidden shrink-0 border-t border-zinc-200/80 dark:border-zinc-800/80 bg-[#FFFFFF]/95 dark:bg-[#14151A]/95 backdrop-blur-md safe-bottom z-20">
+        <div className="grid grid-cols-4 h-14 px-2">
+          {mobileNavItems.map((item) => {
+            const active = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => handleNavigate(item.id)}
+                className={`flex flex-col items-center justify-center space-y-1 text-[10px] font-medium transition-colors ${
+                  active
+                    ? 'text-zinc-900 dark:text-zinc-100'
+                    : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                }`}
+              >
+                <span
+                  className={`px-3 py-1 rounded-full transition-colors ${
+                    active ? 'bg-zinc-200/80 dark:bg-zinc-800' : ''
+                  }`}
+                >
+                  <item.icon className="h-4 w-4" />
+                </span>
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
+      {/* Voice Settings Modal */}
+      {showVoiceSettings && (
+        <VoiceSettingsModal
+          settings={voice.settings}
+          onUpdate={voice.updateSettings}
+          onClose={() => setShowVoiceSettings(false)}
+        />
+      )}
+
+      {/* Global Step-Up Confirmation Modal */}
+      {stepUpTarget && (
+        <StepUpModal
+          title={stepUpTarget.commandName}
+          description={stepUpTarget.description}
+          targetId={stepUpTarget.commandId}
+          onSuccess={handleStepUpSuccess}
+          onClose={closeStepUp}
+        />
+      )}
+    </div>
+  );
+};
 
 export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(authStorage.hasToken());
-  const [activeTab, setActiveTab] = useState<'chat' | 'vault' | 'memories' | 'controls'>('chat');
+  const [showSplash, setShowSplash] = useState<boolean>(true);
+  const [splashSubtitle, setSplashSubtitle] = useState<string>('Menyiapkan asisten...');
   const [deviceStatus, setDeviceStatus] = useState<DeviceStatus | null>(null);
   const [isSignalRConnected, setIsSignalRConnected] = useState<boolean>(false);
   const [showServerSettings, setShowServerSettings] = useState<boolean>(false);
   const [findMyPhoneMessage, setFindMyPhoneMessage] = useState<string | null>(null);
-  const [mobileDrawerOpen, setMobileDrawerOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, 1150);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const handleUnauthorized = () => {
@@ -64,22 +238,16 @@ export const App: React.FC = () => {
         .catch(() => {});
     };
 
-    // Fetch initial device status
     refreshStatus();
 
-    // Periodic fallback polling (30s) to keep telemetry fresh if WebSocket drops,
-    // avoiding aggressive 5s radio wakeups on mobile that cause CPU/modem heat
     const pollInterval = setInterval(refreshStatus, 30000);
 
-    // Start SignalR
     void signalRService.start();
 
-    // Phase 8: Daftarkan HP ke FCM (APK saja; no-op di web / bila Firebase belum dipasang)
     if (isNativeMobile()) {
       void registerDeviceForPush(false).catch(() => {});
     }
 
-    // Phase 7B: Auto-reconnect SignalR segera saat layar HP menyala / app kembali aktif
     const handleResume = () => {
       if (document.visibilityState === 'visible') {
         void signalRService.ensureConnected();
@@ -110,7 +278,6 @@ export const App: React.FC = () => {
 
     const unsubConn = signalRService.onConnectionChange(setIsSignalRConnected);
 
-    // Phase 7: Mobile "Find My Phone" listener (aktif hanya di dalam APK Capacitor)
     const unsubFindPhone = signalRService.onFindMyPhoneRequested((req) => {
       if (!isNativeMobile()) return;
       const duration = req.durationSeconds ?? 10;
@@ -148,15 +315,22 @@ export const App: React.FC = () => {
     };
   }, [isAuthenticated]);
 
+  const handleUnlocked = () => {
+    setSplashSubtitle('Membuka ruang bicara...');
+    setShowSplash(true);
+    setIsAuthenticated(true);
+    setTimeout(() => {
+      setShowSplash(false);
+    }, 500);
+  };
+
   const handleLogout = () => {
     authStorage.clearToken();
     setIsAuthenticated(false);
-    setMobileDrawerOpen(false);
     signalRService.stop();
   };
 
   const handleServerUrlSaved = () => {
-    // Saat server URL berubah: hentikan SignalR lama dan bersihkan token karena JWT server lain tidak valid
     signalRService.stop();
     authStorage.clearToken();
     setDeviceStatus(null);
@@ -170,117 +344,21 @@ export const App: React.FC = () => {
     void api.stopFindMyPhone().catch(() => {});
   };
 
-  if (!isAuthenticated) {
-    return <LockScreen onUnlocked={() => setIsAuthenticated(true)} />;
-  }
-
-  const isLaptopOnline = deviceStatus?.isOnline ?? false;
-
   return (
-    <div className="flex flex-col md:flex-row h-[100dvh] w-screen overflow-hidden bg-zinc-950 font-sans text-zinc-100">
-      {/* Phase 7B: Mobile Top Bar (safe-area notch aware) */}
-      <div className="md:hidden shrink-0 border-b border-zinc-800/80 bg-zinc-950/95 backdrop-blur-md safe-top z-20">
-        <div className="h-12 px-3 flex items-center justify-between">
-          <div className="flex items-center space-x-2.5">
-            <button
-              type="button"
-              onClick={() => setMobileDrawerOpen(true)}
-              aria-label="Buka Menu"
-              className="p-2 rounded-xl text-zinc-300 hover:bg-zinc-900 active:scale-95 transition-all"
-            >
-              <Menu className="h-5 w-5" />
-            </button>
-            <div className="flex items-center space-x-1.5">
-              <Sparkles className="h-4 w-4 text-indigo-400" />
-              <span className="font-semibold text-sm tracking-wide">M.A.Y.A.</span>
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <span
-              className={`inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-full border text-[10px] font-mono ${
-                isLaptopOnline
-                  ? 'bg-emerald-950/70 border-emerald-800/70 text-emerald-400'
-                  : 'bg-zinc-900 border-zinc-800 text-zinc-500'
-              }`}
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  isLaptopOnline ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'
-                }`}
-              />
-              <span>
-                {isLaptopOnline
-                  ? `PC ${deviceStatus?.batteryPercent ?? '—'}%`
-                  : 'PC Offline'}
-              </span>
-            </span>
-
-            <button
-              type="button"
-              onClick={() => setShowServerSettings(true)}
-              aria-label="Pengaturan Server"
-              className="p-1.5 rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
-            >
-              <Settings className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Sidebar Navigation (Desktop Static + Mobile Drawer) */}
-      <Sidebar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        deviceStatus={deviceStatus}
-        isSignalRConnected={isSignalRConnected}
-        onLogout={handleLogout}
-        onOpenServerSettings={() => setShowServerSettings(true)}
-        mobileOpen={mobileDrawerOpen}
-        onCloseMobile={() => setMobileDrawerOpen(false)}
-      />
-
-      {/* Main Workspace Views */}
-      <main className="flex-1 min-h-0 flex flex-col overflow-hidden bg-zinc-950">
-        {activeTab === 'chat' && <ChatWorkspace deviceStatus={deviceStatus} />}
-        {activeTab === 'vault' && <VaultView />}
-        {activeTab === 'memories' && <MemoryView />}
-        {activeTab === 'controls' && (
-          <LaptopControlView
+    <>
+      {!isAuthenticated ? (
+        <LockScreen onUnlocked={handleUnlocked} />
+      ) : (
+        <MayaSessionProvider>
+          <AuthenticatedShell
             deviceStatus={deviceStatus}
-            onActionTriggered={() => setActiveTab('chat')}
+            isSignalRConnected={isSignalRConnected}
+            onLogout={handleLogout}
+            onOpenServerSettings={() => setShowServerSettings(true)}
           />
-        )}
-      </main>
+        </MayaSessionProvider>
+      )}
 
-      {/* Phase 7B: Mobile Bottom Navigation Bar (safe-area gesture bar aware) */}
-      <nav className="md:hidden shrink-0 border-t border-zinc-800/80 bg-zinc-950/95 backdrop-blur-md safe-bottom z-20">
-        <div className="grid grid-cols-4 h-14 px-1">
-          {[
-            { id: 'chat' as const, label: 'Chat', icon: MessageSquare },
-            { id: 'vault' as const, label: 'Vault', icon: KeyRound },
-            { id: 'memories' as const, label: 'Memory', icon: Brain },
-            { id: 'controls' as const, label: 'Control', icon: Sliders },
-          ].map((item) => {
-            const active = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setActiveTab(item.id)}
-                className={`flex flex-col items-center justify-center space-y-1 text-[10px] font-medium transition-colors ${
-                  active ? 'text-indigo-400' : 'text-zinc-500 hover:text-zinc-300'
-                }`}
-              >
-                <item.icon className={`h-4 w-4 ${active ? 'text-indigo-400' : ''}`} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
-
-      {/* Phase 7: Modal Ganti Server URL Dinamis */}
       {showServerSettings && (
         <ServerSettingsModal
           onClose={() => setShowServerSettings(false)}
@@ -288,14 +366,15 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* Phase 7: Overlay Layar Penuh saat Find My Phone Aktif di HP */}
       {findMyPhoneMessage && (
         <FindMyPhoneOverlay
           message={findMyPhoneMessage}
           onStop={handleStopFindMyPhoneOverlay}
         />
       )}
-    </div>
+
+      <SplashLoader visible={showSplash} subtitle={splashSubtitle} />
+    </>
   );
 };
 

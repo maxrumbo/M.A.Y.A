@@ -1,3 +1,13 @@
+export type AppTab = 'home' | 'chat' | 'dashboard' | 'personal';
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  isArchived?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DeviceStatus {
   deviceId: string;
   deviceType: string;

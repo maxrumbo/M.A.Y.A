@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Send,
   Square,
@@ -12,539 +12,415 @@ import {
   XCircle,
   CheckCircle2,
   Clock,
-  Sparkles,
   PlusCircle,
   Mic,
   Volume2,
-  VolumeX,
-  Sliders,
+  History,
+  Trash2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { api } from '../api/client';
-import type { ChatMessage, DeviceStatus, PendingAction, MuteStatus } from '../types';
-import { StepUpModal } from './StepUpModal';
-import { useVoiceAssistant } from '../services/voice/useVoiceAssistant';
+import { useMayaSession } from '../context/MayaSessionContext';
+import type { DeviceStatus } from '../types';
 import { VoiceWaveIndicator } from './voice/VoiceWaveIndicator';
-import { VoiceSettingsModal } from './voice/VoiceSettingsModal';
+import { MayaLogo } from './ui/MayaLogo';
 
 interface ChatWorkspaceProps {
   deviceStatus: DeviceStatus | null;
+  autoFocusInput?: boolean;
+  onInputFocused?: () => void;
 }
 
-export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [conversationId, setConversationId] = useState<string | null>(null);
+export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
+  autoFocusInput = false,
+  onInputFocused,
+}) => {
+  const {
+    messages,
+    conversationId,
+    conversations,
+    loading,
+    muteStatus,
+    voice,
+    actionError,
+    sendMessage,
+    stopGeneration,
+    startNewChat,
+    loadConversation,
+    deleteConversation,
+    muteNotifications,
+    unmuteNotifications,
+    openStepUpForAction,
+    cancelAction,
+    clearActionError,
+  } = useMayaSession();
+
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [muteStatus, setMuteStatus] = useState<MuteStatus | null>(null);
   const [showMuteMenu, setShowMuteMenu] = useState(false);
-  const [showVoiceSettings, setShowVoiceSettings] = useState(false);
+  const [showHistoryMenu, setShowHistoryMenu] = useState(false);
 
-  // Step-Up Modal State
-  const [stepUpTarget, setStepUpTarget] = useState<{
-    commandId: string;
-    commandName: string;
-    description: string;
-  } | null>(null);
-
-  const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const conversationIdRef = useRef<string | null>(conversationId);
 
   useEffect(() => {
-    conversationIdRef.current = conversationId;
-  }, [conversationId]);
-
-  // Load initial mute status
-  useEffect(() => {
-    api.getMuteStatus().then(setMuteStatus).catch(() => {});
-  }, []);
-
-  const handleNewChat = () => {
-    if (loading) return;
-    voiceRef.current?.stopSpeaking();
-    setConversationId(null);
-    setMessages([]);
-  };
-
-  // Send Message (Textarea atau Voice Override)
-  const handleSend = useCallback(async (overrideText?: string) => {
-    const messageToSend = (overrideText ?? input).trim();
-    if (!messageToSend || loading) return;
-
-    if (!overrideText) {
-      setInput('');
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-      }
+    if (autoFocusInput) {
+      setTimeout(() => {
+        textareaRef.current?.focus();
+        onInputFocused?.();
+      }, 80);
     }
+  }, [autoFocusInput, onInputFocused]);
 
-    const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
-      conversationId: conversationIdRef.current || 'default',
-      role: 'user',
-      content: messageToSend,
-      createdAt: new Date().toISOString(),
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
-    setLoading(true);
-
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
-    try {
-      const res = await api.sendMessage(messageToSend, conversationIdRef.current || undefined, abortController.signal);
-
-      if (res.conversationId) {
-        setConversationId(res.conversationId);
-      }
-
-      const botMsg: ChatMessage = {
-        id: `m-${Date.now()}`,
-        conversationId: res.conversationId || conversationIdRef.current || 'default',
-        role: 'model',
-        content: res.reply,
-        createdAt: new Date().toISOString(),
-        pendingActions: res.pendingActions
-          ? res.pendingActions.map((pa) => ({
-              ...pa,
-              status: 'Waiting',
-            }))
-          : null,
-      };
-
-      setMessages((prev) => [...prev, botMsg]);
-
-      // Phase 6A: M.A.Y.A. membacakan balasan teks via TTS
-      voiceRef.current?.speakResponse(res.reply);
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `err-${Date.now()}`,
-            conversationId: conversationIdRef.current || 'default',
-            role: 'model',
-            content: '*Generasi pesan dihentikan.*',
-            createdAt: new Date().toISOString(),
-          },
-        ]);
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `err-${Date.now()}`,
-            conversationId: conversationIdRef.current || 'default',
-            role: 'model',
-            content: `*Error:* ${err.message || 'Gagal menghubungi server.'}`,
-            createdAt: new Date().toISOString(),
-          },
-        ]);
-      }
-    } finally {
-      setLoading(false);
-      abortControllerRef.current = null;
-    }
-  }, [input, loading]);
-
-  // Voice Assistant Hook
-  const voice = useVoiceAssistant({
-    onSendMessage: async (text: string) => {
-      await handleSend(text);
-    },
-    isGenerating: loading,
-  });
-
-  const voiceRef = useRef(voice);
   useEffect(() => {
-    voiceRef.current = voice;
-  }, [voice]);
-
-  // Scroll to bottom
-  const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
   }, [messages, loading]);
 
-  // Handle Mute Action
-  const handleMute = async (minutes: number) => {
-    try {
-      const res = await api.muteNotifications(minutes);
-      setMuteStatus(res);
-      setShowMuteMenu(false);
-    } catch (err: any) {
-      alert(`Gagal mute: ${err.message}`);
+  const handleSendClick = async () => {
+    const text = input.trim();
+    if (!text || loading) return;
+
+    setInput('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
     }
+
+    await sendMessage(text);
   };
 
-  const handleUnmute = async () => {
-    try {
-      await api.unmuteNotifications();
-      setMuteStatus({ isMuted: false, mutedUntil: null, remainingMinutes: 0 });
-      setShowMuteMenu(false);
-    } catch (err: any) {
-      alert(`Gagal unmute: ${err.message}`);
-    }
-  };
-
-  // Stop Generation
-  const handleStop = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    voice.stopSpeaking();
-  };
-
-  // Copy Message
   const handleCopy = (id: string, text: string) => {
-    navigator.clipboard.writeText(text);
+    void navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Handle Command Confirmation (Trigger Step-Up)
-  const handleConfirmAction = (action: PendingAction) => {
-    setStepUpTarget({
-      commandId: action.commandId,
-      commandName: action.commandName,
-      description: action.description,
-    });
-  };
-
-  const handleStepUpSuccess = async (stepUpToken: string) => {
-    if (!stepUpTarget) return;
-
-    const cmdId = stepUpTarget.commandId;
-    setStepUpTarget(null);
-
-    // Update status to Executing
-    setMessages((prev) =>
-      prev.map((msg) => ({
-        ...msg,
-        pendingActions: msg.pendingActions?.map((pa) =>
-          pa.commandId === cmdId ? { ...pa, status: 'Executing' } : pa
-        ),
-      }))
-    );
-
-    try {
-      const res = await api.confirmCommand(cmdId, stepUpToken);
-
-      setMessages((prev) =>
-        prev.map((msg) => ({
-          ...msg,
-          pendingActions: msg.pendingActions?.map((pa) =>
-            pa.commandId === cmdId
-              ? {
-                  ...pa,
-                  status: res.success ? 'Completed' : 'Cancelled',
-                  description: `${pa.description} → ${res.output || 'Selesai dieksekusi.'}`,
-                }
-              : pa
-          ),
-        }))
-      );
-    } catch (err: any) {
-      alert(`Gagal mengeksekusi: ${err.message}`);
-      setMessages((prev) =>
-        prev.map((msg) => ({
-          ...msg,
-          pendingActions: msg.pendingActions?.map((pa) =>
-            pa.commandId === cmdId ? { ...pa, status: 'Cancelled' } : pa
-          ),
-        }))
-      );
-    }
-  };
-
-  // Handle Command Cancellation
-  const handleCancelAction = async (commandId: string) => {
-    try {
-      await api.cancelCommand(commandId);
-      setMessages((prev) =>
-        prev.map((msg) => ({
-          ...msg,
-          pendingActions: msg.pendingActions?.map((pa) =>
-            pa.commandId === commandId
-              ? { ...pa, status: 'Cancelled', description: `${pa.description} (Dibatalkan oleh Maxwell)` }
-              : pa
-          ),
-        }))
-      );
-    } catch (err: any) {
-      alert(`Gagal membatalkan aksi: ${err.message}`);
-    }
-  };
-
-  const isOnline = deviceStatus?.isOnline ?? false;
-
   return (
-    <div className="flex-1 flex flex-col h-full bg-zinc-950 overflow-hidden">
-      {/* Top Header */}
-      <header className="min-h-12 sm:h-14 border-b border-zinc-800/80 px-3 sm:px-4 py-2 flex items-center justify-between gap-2 shrink-0 bg-zinc-950/80 backdrop-blur-md z-10">
-        <div className="flex items-center space-x-2 min-w-0">
-          {/* Mini Telemetry Pill */}
-          <div className="flex items-center space-x-1.5 sm:space-x-2 px-2 sm:px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] sm:text-xs font-mono truncate">
-            <span
-              className={`h-2 w-2 rounded-full shrink-0 ${
-                isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-600'
-              }`}
-            />
-            <span className="text-zinc-300 font-medium">
-              {isOnline ? 'Online' : 'Offline'}
-            </span>
-            {isOnline && (
-              <>
-                <span className="hidden sm:inline text-zinc-600">|</span>
-                <span className="hidden sm:inline text-zinc-400">
-                  CPU {deviceStatus?.cpuUsagePercent?.toFixed(0) ?? '—'}%
-                </span>
-                <span className="hidden md:inline text-zinc-600">|</span>
-                <span className="hidden md:inline text-zinc-400">
-                  RAM {deviceStatus?.ramUsagePercent?.toFixed(0) ?? '—'}%
-                </span>
-                <span className="text-zinc-600">|</span>
-                <span className="text-zinc-400">
-                  BAT {deviceStatus?.batteryPercent ?? '—'}%
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Header Action Controls */}
-        <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
-          {/* Sesi Baru Button */}
-          <button
-            onClick={handleNewChat}
-            disabled={loading}
-            title="Mulai Sesi Percakapan Baru"
-            className="flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 text-xs transition-colors disabled:opacity-50"
-          >
-            <PlusCircle className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Sesi Baru</span>
-          </button>
-
-          {/* Proactive Snooze Controls */}
+    <div className="flex-1 flex flex-col h-full bg-[#F8F9FA] dark:bg-[#0F1014] overflow-hidden transition-colors">
+      {/* Minimal 3-Control Header */}
+      <header className="h-12 sm:h-14 border-b border-zinc-200/80 dark:border-zinc-800/80 px-3 sm:px-5 flex items-center justify-between gap-2 shrink-0 bg-white/80 dark:bg-[#14151A]/90 backdrop-blur-md z-10">
+        <div className="flex items-center space-x-2">
           <div className="relative">
             <button
-              onClick={() => setShowMuteMenu((prev) => !prev)}
-              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs transition-colors ${
-                muteStatus?.isMuted
-                  ? 'bg-amber-950/40 border-amber-800/60 text-amber-300'
-                  : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
-              }`}
+              type="button"
+              onClick={() => {
+                setShowHistoryMenu((prev) => !prev);
+                setShowMuteMenu(false);
+              }}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700 text-xs font-medium transition-colors cursor-pointer"
             >
-              {muteStatus?.isMuted ? (
-                <>
-                  <BellOff className="h-3.5 w-3.5" />
-                  <span>Muted ({muteStatus.remainingMinutes}m)</span>
-                </>
-              ) : (
-                <>
-                  <Bell className="h-3.5 w-3.5" />
-                  <span>Proaktif: Aktif</span>
-                </>
-              )}
+              <History className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span>Riwayat</span>
             </button>
 
+            {showHistoryMenu && (
+              <div className="absolute left-0 mt-2 w-72 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#17191F] p-2 shadow-xl z-30 text-xs">
+                <div className="px-2.5 py-1.5 font-semibold text-zinc-500 dark:text-zinc-400 text-[11px] border-b border-zinc-200/80 dark:border-zinc-800/80 mb-1 flex items-center justify-between">
+                  <span>Riwayat Obrolan</span>
+                  <span>{conversations.length} sesi</span>
+                </div>
+                <div className="max-h-64 overflow-y-auto space-y-1">
+                  {conversations.length === 0 ? (
+                    <p className="px-2.5 py-4 text-center text-zinc-400 dark:text-zinc-500 text-[11px]">
+                      Belum ada sesi tersimpan.
+                    </p>
+                  ) : (
+                    conversations.map((c) => (
+                      <div
+                        key={c.id}
+                        className={`flex items-center justify-between rounded-xl px-2 py-1.5 transition-colors ${
+                          conversationId === c.id
+                            ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-medium'
+                            : 'hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowHistoryMenu(false);
+                            void loadConversation(c.id);
+                          }}
+                          className="flex-1 text-left truncate pr-2 text-xs cursor-pointer"
+                        >
+                          {c.title}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void deleteConversation(c.id)}
+                          title="Hapus percakapan"
+                          className="p-1 text-zinc-400 hover:text-rose-500 dark:text-zinc-500 dark:hover:text-rose-400 shrink-0 cursor-pointer"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={startNewChat}
+            disabled={loading}
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white text-xs font-medium transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            <PlusCircle className="h-3.5 w-3.5" />
+            <span>Sesi Baru</span>
+          </button>
+        </div>
+
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => {
+              setShowMuteMenu((prev) => !prev);
+              setShowHistoryMenu(false);
+            }}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs transition-colors cursor-pointer ${
+              muteStatus?.isMuted
+                ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800/60 text-amber-700 dark:text-amber-300'
+                : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white'
+            }`}
+          >
+            {muteStatus?.isMuted ? (
+              <>
+                <BellOff className="h-3.5 w-3.5" />
+                <span>Muted ({muteStatus.remainingMinutes}m)</span>
+              </>
+            ) : (
+              <>
+                <Bell className="h-3.5 w-3.5" />
+                <span>Proaktif</span>
+              </>
+            )}
+          </button>
+
           {showMuteMenu && (
-            <div className="absolute right-0 mt-2 w-48 rounded-2xl border border-zinc-800 bg-zinc-900/95 backdrop-blur-xl p-1.5 shadow-2xl z-20 text-xs">
-              <div className="px-2.5 py-1.5 font-medium text-zinc-400 text-[11px] border-b border-zinc-800/80 mb-1">
-                Snooze Notifikasi Proaktif
+            <div className="absolute right-0 mt-2 w-48 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#17191F] p-1.5 shadow-xl z-30 text-xs">
+              <div className="px-2.5 py-1.5 font-medium text-zinc-500 dark:text-zinc-400 text-[11px] border-b border-zinc-200/80 dark:border-zinc-800/80 mb-1">
+                Jeda Notifikasi Proaktif
               </div>
               <button
-                onClick={() => handleMute(30)}
-                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-zinc-200 transition-colors"
+                type="button"
+                onClick={() => {
+                  setShowMuteMenu(false);
+                  void muteNotifications(30);
+                }}
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 transition-colors cursor-pointer"
               >
                 Mute 30 Menit
               </button>
               <button
-                onClick={() => handleMute(120)}
-                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-zinc-200 transition-colors"
+                type="button"
+                onClick={() => {
+                  setShowMuteMenu(false);
+                  void muteNotifications(120);
+                }}
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 transition-colors cursor-pointer"
               >
                 Mute 2 Jam
               </button>
               <button
-                onClick={() => handleMute(1440)}
-                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-zinc-200 transition-colors"
+                type="button"
+                onClick={() => {
+                  setShowMuteMenu(false);
+                  void muteNotifications(1440);
+                }}
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 transition-colors cursor-pointer"
               >
-                Mute Sampai Besok (24 Jam)
+                Mute 24 Jam
               </button>
               {muteStatus?.isMuted && (
                 <button
-                  onClick={handleUnmute}
-                  className="w-full text-left px-2.5 py-1.5 rounded-lg text-emerald-400 hover:bg-emerald-950/40 transition-colors mt-1 border-t border-zinc-800/80"
+                  type="button"
+                  onClick={() => {
+                    setShowMuteMenu(false);
+                    void unmuteNotifications();
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors mt-1 border-t border-zinc-200/80 dark:border-zinc-800/80 cursor-pointer"
                 >
-                  Bunyikan Sekarang (Unmute)
+                  Aktifkan Lagi
                 </button>
               )}
             </div>
           )}
         </div>
+      </header>
 
-        {/* TTS Toggle Button */}
-        <button
-          onClick={voice.toggleTts}
-          title={voice.settings.ttsEnabled ? 'Mute Suara TTS M.A.Y.A.' : 'Aktifkan Suara TTS M.A.Y.A.'}
-          className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-xl border text-xs transition-colors ${
-            voice.settings.ttsEnabled
-              ? 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700'
-              : 'bg-zinc-950 border-zinc-800/80 text-zinc-500 hover:text-zinc-400'
-          }`}
-        >
-          {voice.settings.ttsEnabled ? (
-            <Volume2 className="h-3.5 w-3.5 text-indigo-400" />
-          ) : (
-            <VolumeX className="h-3.5 w-3.5 text-zinc-500" />
-          )}
-        </button>
+      {/* Inline Error Banner */}
+      {actionError && (
+        <div className="mx-4 mt-2 px-3.5 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 text-xs text-rose-700 dark:text-rose-300 flex items-center justify-between">
+          <span>{actionError}</span>
+          <button
+            type="button"
+            onClick={clearActionError}
+            className="ml-3 text-[11px] font-medium underline cursor-pointer"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
 
-        {/* Voice Settings Button */}
-        <button
-          onClick={() => setShowVoiceSettings(true)}
-          title="Pengaturan Suara M.A.Y.A. (Phase 6A)"
-          className="flex items-center space-x-1 px-2 py-1.5 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 text-xs transition-colors"
-        >
-          <Sliders className="h-3.5 w-3.5 text-zinc-400" />
-        </button>
-      </div>
-    </header>
-
-      {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5">
+      {/* Messages Area */}
+      <div className="flex-1 overflow-y-auto px-3.5 sm:px-6 py-4 sm:py-6 space-y-5">
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center p-6 text-zinc-500">
-            <div className="h-12 w-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-indigo-400 mb-3">
-              <Sparkles className="h-6 w-6" />
-            </div>
-            <h2 className="text-sm font-medium text-zinc-300">M.A.Y.A. Siap Membantu</h2>
-            <p className="text-xs max-w-sm mt-1 text-zinc-500">
-              Ada yang mau dikerjakan hari ini, Max? Mau cek telemetri laptop, buka workspace ngoding, atau diskusi santai?
+          <div className="h-full flex flex-col items-center justify-center text-center p-6 max-w-sm mx-auto">
+            <MayaLogo size={48} framed />
+            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mt-4">
+              Belum ada pesan di sesi ini
+            </h2>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
+              Ketik pesan di bawah atau tekan tombol mikrofon untuk mulai mengobrol.
             </p>
           </div>
         ) : (
-          messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
-            >
+          <div className="max-w-3xl mx-auto space-y-5">
+            {messages.map((msg) => (
               <div
-                className={`relative max-w-2xl rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                  msg.role === 'user'
-                    ? 'bg-indigo-600 text-white rounded-br-none shadow-sm'
-                    : 'bg-zinc-900 border border-zinc-800/90 text-zinc-200 rounded-bl-none shadow-md'
-                }`}
+                key={msg.id}
+                className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
               >
-                {/* Content with Markdown */}
-                <div className="prose prose-invert prose-xs max-w-none break-words">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                <div
+                  className={`flex items-end gap-2.5 max-w-[92%] sm:max-w-[85%] ${
+                    msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'
+                  }`}
+                >
+                  {msg.role === 'model' && (
+                    <div className="shrink-0 mb-1 hidden sm:block">
+                      <MayaLogo size={24} framed />
+                    </div>
+                  )}
+
+                  <div
+                    className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                      msg.role === 'user'
+                        ? 'bg-zinc-900 dark:bg-indigo-600 text-white rounded-br-md'
+                        : 'bg-white dark:bg-[#17191F] border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-100 rounded-bl-md'
+                    }`}
+                  >
+                    <div className="maya-markdown break-words">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                    </div>
+
+                    {/* Inline Step-Up Confirmation Cards */}
+                    {msg.pendingActions && msg.pendingActions.length > 0 && (
+                      <div className="mt-3.5 space-y-2.5">
+                        {msg.pendingActions.map((action) => (
+                          <div
+                            key={action.commandId}
+                            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0F1014] p-3 text-xs"
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center space-x-2">
+                                <ShieldAlert className="h-4 w-4 text-amber-500" />
+                                <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                                  {action.commandName}
+                                </span>
+                              </div>
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-mono flex items-center space-x-1 ${
+                                  action.status === 'Executing'
+                                    ? 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-400'
+                                    : action.status === 'Completed'
+                                    ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400'
+                                    : action.status === 'Cancelled'
+                                    ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                                    : 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-400'
+                                }`}
+                              >
+                                {action.status === 'Executing' && <Loader2 className="h-3 w-3 animate-spin" />}
+                                {action.status === 'Completed' && <CheckCircle2 className="h-3 w-3" />}
+                                {action.status === 'Cancelled' && <XCircle className="h-3 w-3" />}
+                                {(!action.status || action.status === 'Waiting') && (
+                                  <Clock className="h-3 w-3" />
+                                )}
+                                <span>{action.status || 'Waiting'}</span>
+                              </span>
+                            </div>
+
+                            <p className="text-zinc-700 dark:text-zinc-300 mb-2 leading-relaxed">
+                              {action.description}
+                            </p>
+
+                            {action.emailPreview && (
+                              <div className="mb-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-2.5 text-[11px] font-mono space-y-1">
+                                <div className="flex items-center text-zinc-500 dark:text-zinc-400">
+                                  <Mail className="h-3.5 w-3.5 mr-1.5 text-indigo-500" />
+                                  <span>To: {action.emailPreview.to}</span>
+                                </div>
+                                <div className="text-zinc-800 dark:text-zinc-200 font-medium">
+                                  Subjek: {action.emailPreview.subject}
+                                </div>
+                                <div className="text-zinc-500 dark:text-zinc-400 italic text-[10px] bg-zinc-50 dark:bg-zinc-950 p-1.5 rounded border border-zinc-200 dark:border-zinc-800">
+                                  &ldquo;{action.emailPreview.bodyPreview}&rdquo;
+                                </div>
+                              </div>
+                            )}
+
+                            {(!action.status || action.status === 'Waiting') && (
+                              <div className="flex items-center space-x-2 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => openStepUpForAction(action)}
+                                  className="px-3 py-1.5 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 font-medium transition-colors cursor-pointer"
+                                >
+                                  Konfirmasi &amp; Eksekusi
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void cancelAction(action.commandId)}
+                                  className="px-3 py-1.5 rounded-xl border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer"
+                                >
+                                  Batal
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                {/* Inline Confirmation Card (U1 & H5) */}
-                {msg.pendingActions && msg.pendingActions.length > 0 && (
-                  <div className="mt-3.5 space-y-2.5">
-                    {msg.pendingActions.map((action) => (
-                      <div
-                        key={action.commandId}
-                        className="rounded-xl border border-amber-500/30 bg-zinc-950/70 p-3 text-xs"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center space-x-2">
-                            <ShieldAlert className="h-4 w-4 text-amber-400" />
-                            <span className="font-semibold text-zinc-200 tracking-wide">
-                              {action.commandName}
-                            </span>
-                          </div>
-                          {/* Status Badge */}
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-mono flex items-center space-x-1 ${
-                              action.status === 'Executing'
-                                ? 'bg-blue-950 text-blue-400 border border-blue-900'
-                                : action.status === 'Completed'
-                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-900'
-                                : action.status === 'Cancelled'
-                                ? 'bg-zinc-800 text-zinc-400 border border-zinc-700'
-                                : 'bg-amber-950 text-amber-400 border border-amber-900'
-                            }`}
-                          >
-                            {action.status === 'Executing' && <Loader2 className="h-3 w-3 animate-spin" />}
-                            {action.status === 'Completed' && <CheckCircle2 className="h-3 w-3" />}
-                            {action.status === 'Cancelled' && <XCircle className="h-3 w-3" />}
-                            {action.status === 'Waiting' && <Clock className="h-3 w-3" />}
-                            <span>{action.status || 'Waiting'}</span>
-                          </span>
-                        </div>
+                {msg.role === 'model' && (
+                  <div className="flex items-center space-x-1 mt-1.5 sm:pl-9">
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(msg.id, msg.content)}
+                      className="inline-flex items-center space-x-1 px-2 py-1 rounded-lg text-[11px] text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-200/60 dark:hover:bg-zinc-900 transition-colors cursor-pointer"
+                    >
+                      {copiedId === msg.id ? (
+                        <>
+                          <Check className="h-3 w-3 text-emerald-500" />
+                          <span className="text-emerald-600 dark:text-emerald-400">Disalin</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-3 w-3" />
+                          <span>Salin</span>
+                        </>
+                      )}
+                    </button>
 
-                        <p className="text-zinc-300 mb-2 leading-relaxed">{action.description}</p>
-
-                        {/* H5 Email Preview */}
-                        {action.emailPreview && (
-                          <div className="mb-2.5 rounded-lg border border-zinc-800 bg-zinc-900/90 p-2.5 text-[11px] font-mono space-y-1">
-                            <div className="flex items-center text-zinc-400">
-                              <Mail className="h-3.5 w-3.5 mr-1.5 text-indigo-400" />
-                              <span>To: {action.emailPreview.to}</span>
-                            </div>
-                            <div className="text-zinc-300 font-medium">
-                              Subjek: {action.emailPreview.subject}
-                            </div>
-                            <div className="text-zinc-400 italic text-[10px] bg-zinc-950/80 p-1.5 rounded border border-zinc-800">
-                              "{action.emailPreview.bodyPreview}"
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Action Buttons (Only when Waiting) */}
-                        {(!action.status || action.status === 'Waiting') && (
-                          <div className="flex items-center space-x-2 pt-1">
-                            <button
-                              onClick={() => handleConfirmAction(action)}
-                              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 font-medium text-white transition-colors"
-                            >
-                              Konfirmasi & Eksekusi
-                            </button>
-                            <button
-                              onClick={() => handleCancelAction(action.commandId)}
-                              className="px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors"
-                            >
-                              Batal
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                    <button
+                      type="button"
+                      onClick={() => voice.speakResponse(msg.content)}
+                      className="inline-flex items-center space-x-1 px-2 py-1 rounded-lg text-[11px] text-zinc-400 dark:text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-900 transition-colors cursor-pointer"
+                    >
+                      <Volume2 className="h-3 w-3" />
+                      <span>Dengar</span>
+                    </button>
                   </div>
                 )}
-
-                {/* Copy Button (Model Only) */}
-                {msg.role === 'model' && (
-                  <button
-                    onClick={() => handleCopy(msg.id, msg.content)}
-                    className="absolute -right-7 top-2 text-zinc-600 hover:text-zinc-300 p-1 transition-colors"
-                    title="Salin pesan"
-                  >
-                    {copiedId === msg.id ? (
-                      <Check className="h-3.5 w-3.5 text-emerald-400" />
-                    ) : (
-                      <Copy className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                )}
               </div>
-            </div>
-          ))
+            ))}
+          </div>
         )}
 
         {loading && (
-          <div className="flex items-center space-x-2 text-xs text-zinc-500 pl-2">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-400" />
+          <div className="max-w-3xl mx-auto flex items-center space-x-2 text-xs text-zinc-500 dark:text-zinc-400 pl-2">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-500" />
             <span>M.A.Y.A. sedang memproses...</span>
           </div>
         )}
@@ -552,9 +428,8 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
-      <footer className="p-2.5 sm:p-4 border-t border-zinc-800/80 bg-zinc-950 shrink-0">
-        {/* Phase 6A: Voice Waveform / Status Indicator */}
+      {/* Bottom Input Bar */}
+      <footer className="p-2.5 sm:p-4 border-t border-zinc-200/80 dark:border-zinc-800/80 bg-[#F8F9FA] dark:bg-[#0F1014] shrink-0">
         <VoiceWaveIndicator
           state={voice.voiceState}
           transcript={voice.transcript}
@@ -563,7 +438,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
           voiceMode={voice.settings.voiceMode}
         />
 
-        <div className="max-w-3xl mx-auto flex items-end space-x-2 rounded-2xl border border-zinc-800 bg-zinc-900/90 p-2 focus-within:border-indigo-500/80 focus-within:ring-1 focus-within:ring-indigo-500/50 transition-all">
+        <div className="max-w-3xl mx-auto flex items-end space-x-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#17191F] p-1.5 sm:p-2 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500/30 transition-all">
           <textarea
             ref={textareaRef}
             rows={1}
@@ -576,15 +451,32 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                handleSend();
+                void handleSendClick();
               }
             }}
-            placeholder="Tulis pesan untuk M.A.Y.A..."
-            className="flex-1 max-h-32 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 resize-none outline-none px-2 py-1.5 leading-relaxed"
+            placeholder="Ketik pesan..."
+            className="flex-1 max-h-32 bg-transparent text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 resize-none outline-none px-2.5 py-1.5 leading-relaxed"
           />
 
-          {/* Phase 6A: Voice Input (Mic Button) */}
-          {voice.isSttSupported && (
+          {loading ? (
+            <button
+              type="button"
+              onClick={stopGeneration}
+              title="Hentikan"
+              className="h-9 w-9 shrink-0 rounded-xl bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <Square className="h-4 w-4 fill-current" />
+            </button>
+          ) : input.trim().length > 0 ? (
+            <button
+              type="button"
+              onClick={() => void handleSendClick()}
+              title="Kirim Pesan"
+              className="h-9 w-9 shrink-0 rounded-xl bg-zinc-900 dark:bg-indigo-600 text-white flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          ) : voice.isSttSupported ? (
             <button
               type="button"
               onClick={() => {
@@ -594,62 +486,29 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({ deviceStatus }) =>
                   voice.startListening();
                 }
               }}
-              disabled={loading}
-              title={
+              title={voice.isListening ? 'Selesai & Kirim Suara' : 'Ketuk untuk Bicara'}
+              className={`h-9 px-3.5 shrink-0 rounded-xl flex items-center space-x-1.5 text-xs font-medium transition-colors cursor-pointer ${
                 voice.isListening
-                  ? 'Klik untuk Selesai & Kirim'
-                  : `Mulai Bicara (${voice.settings.voiceMode === 'hands_free' ? 'Hands-Free' : 'Push-to-Talk'})`
-              }
-              className={`p-2 rounded-xl transition-all ${
-                voice.isListening
-                  ? 'bg-emerald-600 text-white animate-pulse ring-2 ring-emerald-400/50 shadow-lg shadow-emerald-500/20'
-                  : 'bg-zinc-800 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700'
-              } disabled:opacity-40 disabled:pointer-events-none`}
+                  ? 'bg-indigo-600 text-white animate-pulse'
+                  : 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950'
+              }`}
             >
               <Mic className="h-4 w-4" />
-            </button>
-          )}
-
-          {loading ? (
-            <button
-              onClick={handleStop}
-              className="p-2 rounded-xl bg-red-600/80 text-white hover:bg-red-500 transition-colors"
-              title="Stop Generasi"
-            >
-              <Square className="h-4 w-4 fill-white" />
+              <span className="hidden xs:inline sm:inline">
+                {voice.isListening ? 'Kirim' : 'Bicara'}
+              </span>
             </button>
           ) : (
             <button
-              onClick={() => handleSend()}
-              disabled={!input.trim()}
-              className="p-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 transition-colors disabled:opacity-30 disabled:pointer-events-none"
-              title="Kirim (Enter)"
+              type="button"
+              disabled
+              className="h-9 w-9 shrink-0 rounded-xl bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 flex items-center justify-center"
             >
               <Send className="h-4 w-4" />
             </button>
           )}
         </div>
       </footer>
-
-      {/* Voice Settings Modal (Phase 6A) */}
-      {showVoiceSettings && (
-        <VoiceSettingsModal
-          settings={voice.settings}
-          onUpdate={voice.updateSettings}
-          onClose={() => setShowVoiceSettings(false)}
-        />
-      )}
-
-      {/* Step-Up Confirmation Modal */}
-      {stepUpTarget && (
-        <StepUpModal
-          title={stepUpTarget.commandName}
-          description={stepUpTarget.description}
-          targetId={stepUpTarget.commandId}
-          onSuccess={handleStepUpSuccess}
-          onClose={() => setStepUpTarget(null)}
-        />
-      )}
     </div>
   );
 };

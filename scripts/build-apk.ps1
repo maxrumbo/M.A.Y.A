@@ -92,24 +92,17 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# 6. Cari hasil APK Gradle
-$possibleApkPaths = @(
-    (Join-Path $androidDir "app\build\outputs\apk\$BuildType\maya.apk"),
-    (Join-Path $androidDir "app\build\outputs\apk\$BuildType\app-$BuildType.apk"),
-    (Join-Path $androidDir "app\build\outputs\apk\$BuildType\app.apk")
-)
+# 6. Cari hasil APK Gradle (prioritaskan app-$BuildType.apk atau file APK terbaru)
+$apkOutputDir = Join-Path $androidDir "app\build\outputs\apk\$BuildType"
+$preferredApk = Join-Path $apkOutputDir "app-$BuildType.apk"
 
 $sourceApk = $null
-foreach ($path in $possibleApkPaths) {
-    if (Test-Path $path) {
-        $sourceApk = $path
-        break
-    }
-}
-
-if (-not $sourceApk) {
-    # Fallback cari sembarang file .apk di folder outputs
-    $found = Get-ChildItem -Path (Join-Path $androidDir "app\build\outputs\apk") -Recurse -Filter "*.apk" | Select-Object -First 1
+if (Test-Path $preferredApk) {
+    $sourceApk = $preferredApk
+} else {
+    $found = Get-ChildItem -Path (Join-Path $androidDir "app\build\outputs\apk") -Recurse -Filter "*.apk" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
     if ($found) { $sourceApk = $found.FullName }
 }
 

@@ -8,6 +8,7 @@ import type {
   AgentSettings,
   WakeWordStateResponse,
   MobileStatus,
+  ConversationSummary,
 } from '../types';
 import { getApiBaseUrl } from '../services/serverConfig';
 
@@ -127,12 +128,15 @@ export const api = {
     ),
 
   getConversations: () =>
-    apiRequest<Array<{ id: string; title: string; createdAt: string; updatedAt: string }>>(
-      '/api/conversations'
-    ),
+    apiRequest<ConversationSummary[]>('/api/conversations'),
 
   getConversationMessages: (conversationId: string) =>
     apiRequest<ChatMessage[]>(`/api/conversations/${conversationId}/messages`),
+
+  deleteConversation: (conversationId: string) =>
+    apiRequest<void>(`/api/conversations/${conversationId}`, {
+      method: 'DELETE',
+    }),
 
   // ─── Agent / Laptop ───
   getDeviceStatus: () =>

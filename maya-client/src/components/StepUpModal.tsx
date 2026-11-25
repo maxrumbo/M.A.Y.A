@@ -94,45 +94,46 @@ export const StepUpModal: React.FC<StepUpModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="relative w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="relative w-full max-w-sm rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#17191F] p-6 shadow-2xl">
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer"
         >
           <X className="h-5 w-5" />
         </button>
 
         <div className="flex items-center space-x-3 mb-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 text-amber-600 dark:text-amber-400">
             <ShieldAlert className="h-5 w-5" />
           </div>
           <div>
-            <h3 className="font-semibold text-zinc-100 text-sm">{title}</h3>
-            <p className="text-xs text-zinc-400 mt-0.5">Konfirmasi Step-Up Diperlukan</p>
+            <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 text-sm">{title}</h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+              Konfirmasi Step-Up Diperlukan
+            </p>
           </div>
         </div>
 
-        <p className="text-xs text-zinc-300 mb-4 bg-zinc-950/60 border border-zinc-800/80 p-3 rounded-lg leading-relaxed">
+        <p className="text-xs text-zinc-700 dark:text-zinc-300 mb-4 bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-zinc-800 p-3 rounded-xl leading-relaxed">
           {description}
         </p>
 
         {error && (
-          <div className="mb-4 flex items-center space-x-2 rounded-lg bg-red-950/40 border border-red-900/60 p-2.5 text-xs text-red-400">
+          <div className="mb-4 flex items-center space-x-2 rounded-xl bg-rose-50 dark:bg-red-950/40 border border-rose-200 dark:border-red-900/60 p-2.5 text-xs text-rose-700 dark:text-red-400">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
-        {/* Phase 7B: One-tap Biometric Step-Up di Android */}
         {canUseBiometric && (
           <div className="mb-4">
             <button
               type="button"
               disabled={loading}
-              onClick={handleBiometricStepUp}
-              className="w-full flex items-center justify-center space-x-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-4 py-3 text-xs font-semibold text-white shadow-lg shadow-indigo-600/20 transition-all disabled:opacity-40"
+              onClick={() => void handleBiometricStepUp()}
+              className="w-full flex items-center justify-center space-x-2 rounded-xl bg-zinc-900 dark:bg-zinc-100 px-4 py-3 text-xs font-semibold text-white dark:text-zinc-950 transition-all disabled:opacity-40 cursor-pointer"
             >
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -144,18 +145,18 @@ export const StepUpModal: React.FC<StepUpModalProps> = ({
               )}
             </button>
             <div className="relative flex items-center justify-center my-3">
-              <div className="border-t border-zinc-800 w-full" />
-              <span className="bg-zinc-900 px-2 text-[10px] font-mono text-zinc-500 uppercase">
+              <div className="border-t border-zinc-200 dark:border-zinc-800 w-full" />
+              <span className="bg-white dark:bg-[#17191F] px-2 text-[10px] font-mono text-zinc-400 dark:text-zinc-500 uppercase">
                 atau PIN
               </span>
-              <div className="border-t border-zinc-800 w-full" />
+              <div className="border-t border-zinc-200 dark:border-zinc-800 w-full" />
             </div>
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-zinc-400 mb-1">
+            <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">
               Master PIN
             </label>
             <input
@@ -166,7 +167,7 @@ export const StepUpModal: React.FC<StepUpModalProps> = ({
               onChange={(e) => setPin(e.target.value)}
               placeholder="••••"
               autoFocus={!canUseBiometric}
-              className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3.5 py-2.5 text-center text-lg tracking-widest text-zinc-100 placeholder-zinc-700 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono"
+              className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3.5 py-2.5 text-center text-lg tracking-widest text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-700 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono"
             />
           </div>
 
@@ -175,14 +176,14 @@ export const StepUpModal: React.FC<StepUpModalProps> = ({
               type="button"
               onClick={onClose}
               disabled={loading}
-              className="w-1/2 rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+              className="w-1/2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-4 py-2.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
             >
               Batal
             </button>
             <button
               type="submit"
               disabled={loading || !pin}
-              className="w-1/2 flex items-center justify-center space-x-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-medium text-white hover:bg-indigo-500 transition-colors disabled:opacity-40"
+              className="w-1/2 flex items-center justify-center space-x-2 rounded-xl bg-zinc-900 dark:bg-zinc-100 px-4 py-2.5 text-xs font-medium text-white dark:text-zinc-950 transition-colors disabled:opacity-40 cursor-pointer"
             >
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
